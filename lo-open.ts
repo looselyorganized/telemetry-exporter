@@ -382,6 +382,7 @@ async function main(): Promise<void> {
     `  ${BOLD}Agents:${RESET} ${telemetry.agentCount} instances, ${telemetry.activeAgents} active`
   );
   console.log(`  ${BOLD}Last sync:${RESET} ${ago}s ago`);
+  console.log(`  ${DIM}Run lo-status for project backlogs${RESET}`);
   console.log();
 }
 
