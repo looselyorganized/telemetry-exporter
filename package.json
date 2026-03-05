@@ -1,0 +1,15 @@
+{
+  "name": "lo-telemetry-exporter",
+  "version": "1.0.0",
+  "description": "Exports Claude Code telemetry to Supabase for the LO operations dashboard",
+  "type": "module",
+  "scripts": {
+    "start": "bun run index.ts",
+    "backfill": "bun run index.ts --backfill",
+    "open": "bun run lo-open.ts",
+    "close": "bun run lo-close.ts"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2"
+  }
+}

@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>com.lo.telemetry-exporter</string>
+
+	<key>ProgramArguments</key>
+	<array>
+		<string>/Users/bigviking/.bun/bin/bun</string>
+		<string>run</string>
+		<string>index.ts</string>
+	</array>
+
+	<key>WorkingDirectory</key>
+	<string>/Users/bigviking/Documents/github/projects/lo/telemetry-exporter</string>
+
+	<!-- Always restart if it exits for any reason -->
+	<key>KeepAlive</key>
+	<true/>
+
+	<!-- Wait 10s between restarts to avoid crash loops -->
+	<key>ThrottleInterval</key>
+	<integer>10</integer>
+
+	<!-- Log stdout and stderr -->
+	<key>StandardOutPath</key>
+	<string>/Users/bigviking/.claude/lo-exporter.log</string>
+	<key>StandardErrorPath</key>
+	<string>/Users/bigviking/.claude/lo-exporter.err</string>
+
+	<!-- Ensure PATH includes bun and standard locations -->
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>PATH</key>
+		<string>/Users/bigviking/.bun/bin:/usr/local/bin:/usr/bin:/usr/sbin:/bin:/sbin</string>
+		<key>HOME</key>
+		<string>/Users/bigviking</string>
+	</dict>
+
+	<!-- Run as user agent (starts on login, not boot) -->
+	<key>RunAtLoad</key>
+	<true/>
+</dict>
+</plist>
