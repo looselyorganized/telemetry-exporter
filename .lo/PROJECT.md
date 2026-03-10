@@ -22,7 +22,7 @@ agents:
     role: "AI coding agent (Claude Code)"
 ---
 
-Bun-powered daemon that reads Claude Code's native telemetry files (`~/.claude/events.log`, `token-stats`, `model-stats`, `stats-cache.json`) and syncs them to Supabase Postgres. Provides facility-wide operational visibility for the LO platform.
+Bun-powered daemon that reads Claude Code's native telemetry files (`~/.claude/events.log`, `model-stats`, `stats-cache.json`) and syncs them to Supabase Postgres. Provides facility-wide operational visibility for the LO platform.
 
 ## Capabilities
 
@@ -34,7 +34,7 @@ Bun-powered daemon that reads Claude Code's native telemetry files (`~/.claude/e
 
 ## Architecture
 
-TypeScript/Bun daemon polls ~/.claude/ files at 30s (active) or 5min (dormant) intervals. Parses events, model stats, and JSONL conversation files. Upserts to Supabase Postgres tables: events, projects, daily_metrics, facility_status. launchd keeps it alive.
+TypeScript/Bun daemon with dual-loop architecture: 250ms process watcher (agent state push-on-change) + 5s aggregator (tokens, sessions, events). Parses events, model stats, and JSONL conversation files. Upserts to Supabase Postgres tables: events, projects, daily_metrics, facility_status, project_telemetry. launchd keeps it alive.
 
 ## Infrastructure
 

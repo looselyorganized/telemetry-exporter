@@ -6,7 +6,7 @@
  * Only sets facility to "open" when the entire telemetry pipeline is verified healthy.
  *
  * Usage:
- *   bun run lo-open.ts
+ *   bun run bin/lo-open.ts
  */
 
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
@@ -27,7 +27,7 @@ import {
   printOpenBanner,
   isProcessRunning,
   loadEnv,
-} from "./cli-output";
+} from "../src/cli-output";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 

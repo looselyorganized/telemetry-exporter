@@ -6,7 +6,7 @@
  * unloads the launchd service.
  *
  * Usage:
- *   bun run lo-close.ts
+ *   bun run bin/lo-close.ts
  */
 
 import { createClient } from "@supabase/supabase-js";
@@ -25,7 +25,7 @@ import {
   printCloseBanner,
   isProcessRunning,
   loadEnv,
-} from "./cli-output";
+} from "../src/cli-output";
 
 // ─── Main ───────────────────────────────────────────────────────────────────
 

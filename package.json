@@ -4,11 +4,11 @@
   "description": "Exports Claude Code telemetry to Supabase for the LO operations dashboard",
   "type": "module",
   "scripts": {
-    "start": "bun run index.ts",
-    "backfill": "bun run index.ts --backfill",
-    "open": "bun run lo-open.ts",
-    "close": "bun run lo-close.ts",
-    "status": "bun run lo-status.ts"
+    "start": "bun run bin/daemon.ts",
+    "backfill": "bun run bin/daemon.ts --backfill",
+    "open": "bun run bin/lo-open.ts",
+    "close": "bun run bin/lo-close.ts",
+    "status": "bun run bin/lo-status.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2"

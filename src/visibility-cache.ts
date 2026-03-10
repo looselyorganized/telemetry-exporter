@@ -5,12 +5,13 @@
 
 import { execSync } from "child_process";
 import { existsSync, readFileSync, writeFileSync } from "fs";
-import { dirname, join } from "path";
+import { join } from "path";
 
 type Visibility = "public" | "private";
 
 const CACHE_FILE = join(
-  dirname(new URL(import.meta.url).pathname),
+  import.meta.dirname!,
+  "..",
   ".visibility-cache.json"
 );
 
