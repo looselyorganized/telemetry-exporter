@@ -11,10 +11,22 @@
  */
 
 import { existsSync, readdirSync, readFileSync, statSync } from "fs";
-import { basename, join } from "path";
+import { homedir } from "os";
+import { basename, join, normalize } from "path";
 
-const PROJECT_ROOT =
-  process.env.LO_PROJECT_ROOT || "/Users/bigviking/Documents/github/projects/lo";
+/**
+ * Normalize a filesystem path: expand a leading "~" to the user's home
+ * directory, resolve relative segments, and strip any trailing slash.
+ */
+export function normalizeFsPath(p: string): string {
+  if (p === "~") return homedir();
+  if (p.startsWith("~/")) p = join(homedir(), p.slice(2));
+  return normalize(p).replace(/\/+$/, "");
+}
+
+export const PROJECT_ROOT = normalizeFsPath(
+  process.env.LO_PROJECT_ROOT || "/Users/bigviking/Documents/github/projects/lo"
+);
 
 const slugCache = new Map<string, string | null>();
 const projIdCache = new Map<string, string | null>();
