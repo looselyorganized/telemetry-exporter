@@ -45,7 +45,7 @@ export function getSupabase(): SupabaseClient {
 
 /**
  * Ensure a project exists in the projects table.
- * Upserts on proj_id (canonical PK). Tracks local directory names
+ * Upserts on id (canonical PK). Tracks local directory names
  * in the local_names array.
  */
 export async function upsertProject(
@@ -60,7 +60,7 @@ export async function upsertProject(
     .from("projects")
     .upsert(
       {
-        proj_id: projId,
+        id: projId,
         content_slug: contentSlug,
         visibility: visibility === "public" ? "public" : "private",
         state: visibility === "public" ? "public" : "private",
@@ -69,7 +69,7 @@ export async function upsertProject(
         last_active: now.toISOString(),
         local_names: [],
       },
-      { onConflict: "proj_id", ignoreDuplicates: false }
+      { onConflict: "id", ignoreDuplicates: false }
     )
     .select("local_names")
     .single();
@@ -81,7 +81,7 @@ export async function upsertProject(
     const { data: fallback, error: updateError } = await supabase
       .from("projects")
       .update({ last_active: now.toISOString(), visibility })
-      .eq("proj_id", projId)
+      .eq("id", projId)
       .select("local_names")
       .single();
     if (updateError) {
@@ -97,7 +97,7 @@ export async function upsertProject(
       await supabase
         .from("projects")
         .update({ local_names: [...localNames, localName] })
-        .eq("proj_id", projId);
+        .eq("id", projId);
     }
   }
 }
@@ -113,7 +113,7 @@ export async function updateProjectActivity(
   const { data: current } = await supabase
     .from("projects")
     .select("total_events")
-    .eq("proj_id", projId)
+    .eq("id", projId)
     .single();
 
   if (current) {
@@ -123,7 +123,7 @@ export async function updateProjectActivity(
         total_events: current.total_events + eventCount,
         last_active: lastActive.toISOString(),
       })
-      .eq("proj_id", projId);
+      .eq("id", projId);
   }
 }
 
@@ -149,7 +149,7 @@ export async function insertEvents(entries: LogEntry[]): Promise<InsertEventsRes
     .filter((e) => e.parsedTimestamp)
     .map((e) => ({
       timestamp: e.parsedTimestamp!.toISOString(),
-      proj_id: e.project,
+      project_id: e.project,
       branch: e.branch || null,
       emoji: e.emoji || null,
       event_type: e.eventType,
@@ -165,7 +165,7 @@ export async function insertEvents(entries: LogEntry[]): Promise<InsertEventsRes
     const batch = rows.slice(i, i + BATCH_SIZE);
     const { error } = await supabase
       .from("events")
-      .upsert(batch, { onConflict: "proj_id,event_type,event_text,timestamp", ignoreDuplicates: true });
+      .upsert(batch, { onConflict: "project_id,event_type,event_text,timestamp", ignoreDuplicates: true });
 
     if (error) {
       console.error(`  Error inserting batch ${i}-${i + batch.length}:`, error.message);
@@ -175,8 +175,8 @@ export async function insertEvents(entries: LogEntry[]): Promise<InsertEventsRes
 
     inserted += batch.length;
     for (const row of batch) {
-      if (row.proj_id) {
-        insertedByProject[row.proj_id] = (insertedByProject[row.proj_id] ?? 0) + 1;
+      if (row.project_id) {
+        insertedByProject[row.project_id] = (insertedByProject[row.project_id] ?? 0) + 1;
       }
     }
   }
@@ -208,7 +208,7 @@ export async function syncDailyMetrics(statsCache: StatsCache): Promise<number> 
 
   const rows = statsCache.dailyActivity.map((day) => ({
     date: day.date,
-    proj_id: null as string | null, // NULL = global aggregate
+    project_id: null as string | null, // NULL = global aggregate
     messages: day.messageCount,
     sessions: day.sessionCount,
     tool_calls: day.toolCallCount,
@@ -223,7 +223,7 @@ export async function syncDailyMetrics(statsCache: StatsCache): Promise<number> 
     .from("daily_metrics")
     .select("id, date")
     .in("date", dates)
-    .is("proj_id", null);
+    .is("project_id", null);
 
   const existingByDate = new Map<string, number>();
   for (const row of existingRows ?? []) {
@@ -232,7 +232,7 @@ export async function syncDailyMetrics(statsCache: StatsCache): Promise<number> 
 
   // Split into updates vs inserts
   const toInsert: typeof rows = [];
-  const toUpdate: Array<{ id: number; data: Omit<typeof rows[0], "date" | "proj_id"> }> = [];
+  const toUpdate: Array<{ id: number; data: Omit<typeof rows[0], "date" | "project_id"> }> = [];
 
   for (const row of rows) {
     const existingId = existingByDate.get(row.date);
@@ -319,19 +319,19 @@ export async function syncProjectDailyMetrics(
     const projectBatch = projects.slice(i, i + FETCH_BATCH);
     const { data: existingRows } = await supabase
       .from("daily_metrics")
-      .select("id, date, proj_id")
-      .in("proj_id", projectBatch)
+      .select("id, date, project_id")
+      .in("project_id", projectBatch)
       .in("date", dates);
 
     for (const row of existingRows ?? []) {
-      existingByKey.set(makeKey(row.proj_id, row.date), { id: row.id });
+      existingByKey.set(makeKey(row.project_id, row.date), { id: row.id });
     }
   }
 
   // Split into updates vs inserts
   interface ProjectDailyMetricsInsert {
     date: string;
-    proj_id: string;
+    project_id: string;
     tokens: Record<string, number> | null;
     sessions: number;
     messages: number;
@@ -370,7 +370,7 @@ export async function syncProjectDailyMetrics(
     } else {
       toInsert.push({
         date: row.date,
-        proj_id: row.project,
+        project_id: row.project,
         tokens: row.tokens ?? null,
         sessions: row.events?.sessions ?? 0,
         messages: row.events?.messages ?? 0,
@@ -504,7 +504,7 @@ export interface ProjectTelemetryUpdate {
 }
 
 interface ProjectTelemetryRow {
-  proj_id: string;
+  id: string;
   tokens_lifetime: number;
   tokens_today: number;
   models_today: Record<string, number>;
@@ -528,7 +528,7 @@ export async function batchUpsertProjectTelemetry(
 
   function toRow(u: ProjectTelemetryUpdate): ProjectTelemetryRow {
     const row: ProjectTelemetryRow = {
-      proj_id: u.projId,
+      id: u.projId,
       tokens_lifetime: u.tokensLifetime,
       tokens_today: u.tokensToday,
       models_today: u.modelsToday,
@@ -555,7 +555,7 @@ export async function batchUpsertProjectTelemetry(
   const rows = updates.map(toRow);
   const { error } = await supabase
     .from("project_telemetry")
-    .upsert(rows, { onConflict: "proj_id" });
+    .upsert(rows, { onConflict: "id" });
 
   if (error) {
     // Batch failed (likely FK violation) -- fall back to per-row upserts
@@ -564,7 +564,7 @@ export async function batchUpsertProjectTelemetry(
     for (const update of updates) {
       const { error: rowError } = await supabase
         .from("project_telemetry")
-        .upsert(toRow(update), { onConflict: "proj_id" });
+        .upsert(toRow(update), { onConflict: "id" });
       if (rowError) {
         console.error(`  project_telemetry: skipping ${update.projId} (${rowError.message})`);
       } else {
@@ -584,11 +584,11 @@ export async function batchUpsertProjectTelemetry(
 async function verifyProjectTelemetry(updates: ProjectTelemetryUpdate[]): Promise<void> {
   const { data: rows } = await supabase
     .from("project_telemetry")
-    .select("proj_id, tokens_lifetime");
+    .select("id, tokens_lifetime");
 
   if (!rows) return;
 
-  const dbValues = new Map(rows.map((r) => [r.proj_id as string, Number(r.tokens_lifetime)]));
+  const dbValues = new Map(rows.map((r) => [r.id as string, Number(r.tokens_lifetime)]));
   let mismatches = 0;
 
   for (const u of updates) {
@@ -617,7 +617,7 @@ export async function deleteProjectDailyMetrics(): Promise<number> {
   const { count, error } = await supabase
     .from("daily_metrics")
     .delete({ count: "exact" })
-    .not("proj_id", "is", null);
+    .not("project_id", "is", null);
 
   if (error) {
     console.error("Error deleting per-project daily_metrics:", error.message);
@@ -664,7 +664,7 @@ export async function pushAgentState(diff: ProcessDiff): Promise<void> {
     supabase
       .from("project_telemetry")
       .update({ active_agents: counts.active, agent_count: counts.count, updated_at: now })
-      .eq("proj_id", projId)
+      .eq("id", projId)
   );
 
   // Facility agent fields only -- status is owned by the manual switch (lo-open/lo-close)
@@ -676,7 +676,7 @@ export async function pushAgentState(diff: ProcessDiff): Promise<void> {
   const activityWrites = [...diff.byProject.entries()]
     .filter(([, counts]) => counts.active > 0)
     .map(([projId]) =>
-      supabase.from("projects").update({ last_active: now }).eq("proj_id", projId)
+      supabase.from("projects").update({ last_active: now }).eq("id", projId)
     );
 
   const results = await Promise.all([...projectWrites, facilityWrite, ...activityWrites]);

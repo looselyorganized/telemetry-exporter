@@ -1,13 +1,13 @@
 /**
  * Slug resolver for the LO telemetry exporter.
  *
- * Maps project directory paths to their content_slug and proj_id by reading
+ * Maps project directory paths to their content_slug and id by reading
  * .lo/PROJECT.md frontmatter. Only LO projects (those with .lo/)
  * are tracked — all others are silently ignored.
  *
  * Two resolution strategies:
- * 1. Live repos: reads .lo/PROJECT.md (or legacy .lo/project.md) for proj_id
- * 2. Legacy/orphan dirs: static mapping in .project-mapping.json (encoded path → proj_id)
+ * 1. Live repos: reads .lo/PROJECT.md (or legacy .lo/project.md) for id
+ * 2. Legacy/orphan dirs: static mapping in .project-mapping.json (encoded path → id)
  */
 
 import { existsSync, readdirSync, readFileSync, statSync } from "fs";
@@ -21,7 +21,7 @@ const projIdCache = new Map<string, string | null>();
 let legacyMappingCache: Map<string, string> | null = null;
 
 /** Minimal YAML frontmatter parser — extracts key: value pairs between --- fences. */
-function parseFrontmatter(content: string): Record<string, string> {
+export function parseFrontmatter(content: string): Record<string, string> {
   const match = content.match(/^---\s*\n([\s\S]*?)\n---/);
   if (!match) return {};
 
@@ -108,13 +108,13 @@ export function clearSlugCache(): void {
 }
 
 // ---------------------------------------------------------------------------
-// proj_id resolution (stable UUIDs — replaces slug-based identification)
+// id resolution (stable UUIDs — replaces slug-based identification)
 // ---------------------------------------------------------------------------
 
 /**
- * Resolve a project directory path to its proj_id.
- * Reads .lo/PROJECT.md (or legacy .lo/project.md) frontmatter for the proj_id field.
- * Returns null if the project has no .lo/ directory or no proj_id in frontmatter.
+ * Resolve a project directory path to its id.
+ * Reads .lo/PROJECT.md (or legacy .lo/project.md) frontmatter for the id field.
+ * Returns null if the project has no .lo/ directory or no id in frontmatter.
  */
 export function resolveProjId(projectDir: string): string | null {
   if (projIdCache.has(projectDir)) return projIdCache.get(projectDir)!;
@@ -133,7 +133,7 @@ export function resolveProjId(projectDir: string): string | null {
       : join(loDir, "project.md");
     const content = readFileSync(projectMdPath, "utf-8");
     const fm = parseFrontmatter(content);
-    projId = fm.proj_id ?? null;
+    projId = fm.id ?? fm.proj_id ?? null;
   } catch {
     // .lo/ exists but no PROJECT.md or project.md — no proj_id available
   }
@@ -145,7 +145,7 @@ export function resolveProjId(projectDir: string): string | null {
 /**
  * Resolve a project directory path to its content_slug.
  * Convenience alias for resolveSlug() — named explicitly to distinguish
- * from proj_id resolution during the migration period.
+ * from id resolution during the migration period.
  */
 export function resolveContentSlug(projectDir: string): string | null {
   return resolveSlug(projectDir);
@@ -153,7 +153,7 @@ export function resolveContentSlug(projectDir: string): string | null {
 
 /**
  * Load the static legacy mapping from .project-mapping.json.
- * Returns a Map of encoded JSONL directory names → proj_id values
+ * Returns a Map of encoded JSONL directory names → id values
  * for directories that no longer exist on disk (old looselyorganized paths).
  *
  * The mapping is loaded once and cached for the lifetime of the process.
@@ -186,7 +186,7 @@ export function loadLegacyMapping(): Map<string, string> {
 }
 
 /**
- * Clear the in-memory proj_id and legacy mapping caches.
+ * Clear the in-memory id and legacy mapping caches.
  * Call before refreshing proj_id resolution.
  */
 export function clearProjIdCache(): void {

@@ -7,4 +7,4 @@ jobs:
   pipeline:
     uses: looselyorganized/ci/.github/workflows/reusable-ci.yml@main
     with:
-      status: explore
+      status: build

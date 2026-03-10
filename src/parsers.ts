@@ -18,7 +18,7 @@ export const STATS_CACHE_FILE = join(CLAUDE_DIR, "stats-cache.json");
 
 const ANSI_RE = /\033\[[0-9;]*m/g;
 
-function stripAnsi(text: string): string {
+export function stripAnsi(text: string): string {
   return text.replace(ANSI_RE, "");
 }
 

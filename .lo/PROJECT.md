@@ -1,14 +1,9 @@
 ---
-proj_id: "proj_fc236751-369a-4b23-847e-577e06753eee"
+id: "proj_fc236751-369a-4b23-847e-577e06753eee"
 title: "Telemetry Exporter"
 description: "Bun daemon that syncs Claude Code telemetry from ~/.claude/ to Supabase for the LO operations dashboard."
-status: "explore"
+status: "build"
 state: "private"
-topics:
-  - telemetry
-  - developer-tools
-  - claude-code
-  - observability
 repo: "https://github.com/looselyorganized/telemetry-exporter.git"
 stack:
   - TypeScript
