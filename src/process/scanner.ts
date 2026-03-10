@@ -78,8 +78,13 @@ function execQuiet(cmd: string): string | null {
   }
 }
 
+/** Clear the project name cache (useful for testing). */
+export function clearProjectNameCache(): void {
+  projectNameCache.clear();
+}
+
 /** Parse Claude processes from ps output. */
-function parseClaudeProcesses(psOutput: string): Array<{
+export function parseClaudeProcesses(psOutput: string): Array<{
   pid: number;
   cpu: number;
   memMb: number;
@@ -105,11 +110,8 @@ function parseClaudeProcesses(psOutput: string): Array<{
   return results;
 }
 
-/** Resolve working directories for a set of PIDs via lsof. */
-function resolveCwds(pids: number[]): Record<number, string> {
-  const output = execQuiet(`lsof -d cwd -a -p ${pids.join(",")} -Fn`);
-  if (!output) return {};
-
+/** Parse lsof output (p/n line format) into a pid→cwd map. */
+export function parseLsofCwds(output: string): Record<number, string> {
   const cwdMap: Record<number, string> = {};
   let currentPid = 0;
   for (const line of output.split("\n")) {
@@ -122,11 +124,15 @@ function resolveCwds(pids: number[]): Record<number, string> {
   return cwdMap;
 }
 
-/** Find parent PIDs that have a caffeinate child (indicates active work). */
-function findCaffeinatePids(): Set<number> {
-  const output = execQuiet("ps -eo pid,ppid,comm");
-  if (!output) return new Set();
+/** Resolve working directories for a set of PIDs via lsof. */
+function resolveCwds(pids: number[]): Record<number, string> {
+  const output = execQuiet(`lsof -d cwd -a -p ${pids.join(",")} -Fn`);
+  if (!output) return {};
+  return parseLsofCwds(output);
+}
 
+/** Parse ps output to find parent PIDs of caffeinate processes. */
+export function parseCaffeinateParents(output: string): Set<number> {
   const pids = new Set<number>();
   for (const line of output.split("\n").slice(1)) {
     const parts = line.trim().split(/\s+/);
@@ -135,6 +141,13 @@ function findCaffeinatePids(): Set<number> {
     }
   }
   return pids;
+}
+
+/** Find parent PIDs that have a caffeinate child (indicates active work). */
+function findCaffeinatePids(): Set<number> {
+  const output = execQuiet("ps -eo pid,ppid,comm");
+  if (!output) return new Set();
+  return parseCaffeinateParents(output);
 }
 
 /**

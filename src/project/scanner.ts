@@ -24,7 +24,7 @@ const ENCODED_ROOTS = [PROJECT_ROOT, LEGACY_ROOT].map((r) => r.replace(/\//g, "-
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
-/** proj_id -> date -> { model: totalTokens } */
+/** id -> date -> { model: totalTokens } */
 export type ProjectTokenMap = Map<string, Map<string, Record<string, number>>>;
 
 interface JsonlFile {
@@ -54,7 +54,7 @@ function readProjectDirs(): string[] {
 }
 
 /** Get or create a value in a Map, inserting `defaultValue()` if the key is absent. */
-function getOrCreate<K, V>(map: Map<K, V>, key: K, defaultValue: () => V): V {
+export function getOrCreate<K, V>(map: Map<K, V>, key: K, defaultValue: () => V): V {
   let value = map.get(key);
   if (value === undefined) {
     value = defaultValue();
@@ -95,7 +95,7 @@ export function resolveProjectName(encodedDirName: string): string | null {
 }
 
 /**
- * Resolve an encoded ~/.claude/projects/ directory name to a proj_id.
+ * Resolve an encoded ~/.claude/projects/ directory name to an id.
  *
  * Two-step resolution:
  * 1. Live repos: resolveProjectName() → resolveProjId() from .lo/PROJECT.md
@@ -119,7 +119,7 @@ export function resolveProjIdForDir(encodedDirName: string): string | null {
  * Find all .jsonl files in a project directory: top-level session files
  * and subagent session files nested under <session-uuid>/subagents/.
  */
-function discoverJsonlFiles(dirPath: string): JsonlFile[] {
+export function discoverJsonlFiles(dirPath: string): JsonlFile[] {
   const files: JsonlFile[] = [];
 
   let entries: string[];
@@ -162,7 +162,7 @@ function discoverJsonlFiles(dirPath: string): JsonlFile[] {
  * Fast-filters lines by "usage" substring before parsing JSON.
  * Deduplicates by requestId to avoid counting streaming chunks.
  */
-function extractUsageRecords(
+export function extractUsageRecords(
   filePath: string,
   projId: string,
   result: ProjectTokenMap
@@ -278,7 +278,7 @@ export function scanProjectTokens(): ProjectTokenMap {
 
 // ─── Per-project lifetime totals ────────────────────────────────────────────
 
-/** Compute total lifetime tokens per project (keyed by proj_id) from the token map. */
+/** Compute total lifetime tokens per project (keyed by id) from the token map. */
 export function computeTokensByProject(
   tokenMap: ProjectTokenMap
 ): Record<string, number> {

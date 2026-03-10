@@ -4,7 +4,9 @@ updated: 2026-03-10
 
 ## Features
 
-_No features in backlog. Use `/lo:backlog feature "description"` to add one._
+- [ ] f001 Test Coverage
+  Retroactive test coverage for core project logic. Generated during Explore → Build transition.
+  [active](work/f001-test-coverage/)
 
 ## Tasks
 

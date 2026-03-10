@@ -49,7 +49,7 @@ interface SnapshotEntry {
 }
 
 /** Count truthy values without allocating a filtered copy. */
-function countTruthy(values: boolean[]): number {
+export function countTruthy(values: boolean[]): number {
   let n = 0;
   for (const v of values) {
     if (v) n++;

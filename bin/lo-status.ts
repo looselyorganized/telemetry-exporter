@@ -11,6 +11,7 @@
 import { readFileSync, existsSync, readdirSync } from "fs";
 import { join } from "path";
 import { DIM, RESET, BOLD, EXPORTER_DIR } from "../src/cli-output";
+import { parseFrontmatter, parseBacklogFeatures, parseBacklogTasks, type Feature, type Task } from "./lo-status-helpers";
 
 // ─── .env Parsing (just LO_PROJECT_ROOT, no Supabase) ──────────────────────
 
@@ -38,17 +39,6 @@ function loadProjectRoot(): string {
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
-interface Feature {
-  id: string;
-  name: string;
-  status: string; // "in work" for work dirs, or status text from backlog
-}
-
-interface Task {
-  id: string;
-  text: string;
-}
-
 interface Project {
   dir: string;
   title: string;
@@ -60,27 +50,6 @@ interface Project {
 
 // ─── Parsing ────────────────────────────────────────────────────────────────
 
-function parseFrontmatter(content: string): Record<string, string> {
-  const meta: Record<string, string> = {};
-  if (!content.startsWith("---")) return meta;
-  const end = content.indexOf("---", 3);
-  if (end === -1) return meta;
-  const block = content.slice(3, end);
-  for (const line of block.split("\n")) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("#")) continue;
-    const colonIdx = trimmed.indexOf(":");
-    if (colonIdx === -1) continue;
-    const k = trimmed.slice(0, colonIdx).trim();
-    let v = trimmed.slice(colonIdx + 1).trim();
-    // Strip inline YAML comments (e.g. "explore"  # comment)
-    v = v.replace(/^["']([^"']*)["']\s*#.*$/, "$1");
-    v = v.replace(/^["']|["']$/g, "");
-    meta[k] = v;
-  }
-  return meta;
-}
-
 function parseProjectMd(path: string): { title: string; status: string; state: string } | null {
   if (!existsSync(path)) return null;
   const content = readFileSync(path, "utf-8");
@@ -91,54 +60,6 @@ function parseProjectMd(path: string): { title: string; status: string; state: s
     status: meta.status || "unknown",
     state: meta.state || "private",
   };
-}
-
-function parseBacklogFeatures(content: string): Feature[] {
-  const features: Feature[] = [];
-  const lines = content.split("\n");
-
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    // Match ### fNNN — Name
-    const match = line.match(/^###\s+(f\d+)\s+[—–-]\s+(.+)/);
-    if (!match) continue;
-
-    const id = match[1];
-    const name = match[2].trim();
-
-    // Look for Status: line in the next few lines
-    let status = "backlog";
-    for (let j = i + 1; j < Math.min(i + 5, lines.length); j++) {
-      const statusMatch = lines[j].match(/^Status:\s*(.+)/i);
-      if (statusMatch) {
-        status = statusMatch[1].trim().toLowerCase();
-        break;
-      }
-      // Stop at next heading
-      if (lines[j].startsWith("#")) break;
-    }
-
-    // Skip done features (matches "done", "done -> 2026-02-25", etc.)
-    if (status.startsWith("done")) continue;
-
-    features.push({ id, name, status });
-  }
-
-  return features;
-}
-
-function parseBacklogTasks(content: string): Task[] {
-  const tasks: Task[] = [];
-  const lines = content.split("\n");
-
-  for (const line of lines) {
-    const match = line.match(/^-\s+\[\s\]\s+(t\d+)\s+(.+)/);
-    if (match) {
-      tasks.push({ id: match[1], text: match[2].trim() });
-    }
-  }
-
-  return tasks;
 }
 
 function getWorkFeatures(loDir: string): Feature[] {
