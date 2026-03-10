@@ -55,6 +55,21 @@ function isDirectory(path: string): boolean {
   }
 }
 
+/** Read and parse the PROJECT.md frontmatter from a .lo/ directory, or null if not found. */
+function readProjectFrontmatter(projectDir: string): Record<string, string> | null {
+  const loDir = join(projectDir, ".lo");
+  if (!existsSync(loDir)) return null;
+
+  try {
+    const projectMdPath = existsSync(join(loDir, "PROJECT.md"))
+      ? join(loDir, "PROJECT.md")
+      : join(loDir, "project.md");
+    return parseFrontmatter(readFileSync(projectMdPath, "utf-8"));
+  } catch {
+    return {};
+  }
+}
+
 /**
  * Resolve a project directory path to its content_slug.
  * Returns null if the project has no .lo/ directory (opt-in signal).
@@ -64,25 +79,13 @@ function isDirectory(path: string): boolean {
 export function resolveSlug(projectDir: string): string | null {
   if (slugCache.has(projectDir)) return slugCache.get(projectDir)!;
 
-  const loDir = join(projectDir, ".lo");
-  if (!existsSync(loDir)) {
+  const fm = readProjectFrontmatter(projectDir);
+  if (!fm) {
     slugCache.set(projectDir, null);
     return null;
   }
 
-  let slug = basename(projectDir);
-
-  try {
-    const projectMdPath = existsSync(join(loDir, "PROJECT.md"))
-      ? join(loDir, "PROJECT.md")
-      : join(loDir, "project.md");
-    const content = readFileSync(projectMdPath, "utf-8");
-    const fm = parseFrontmatter(content);
-    slug = fm.content_slug ?? fm.slug ?? slug;
-  } catch {
-    // .lo/ exists but no PROJECT.md or project.md — use directory basename
-  }
-
+  const slug = fm.content_slug ?? fm.slug ?? basename(projectDir);
   slugCache.set(projectDir, slug);
   return slug;
 }
@@ -131,36 +134,11 @@ export function clearSlugCache(): void {
 export function resolveProjId(projectDir: string): string | null {
   if (projIdCache.has(projectDir)) return projIdCache.get(projectDir)!;
 
-  const loDir = join(projectDir, ".lo");
-  if (!existsSync(loDir)) {
-    projIdCache.set(projectDir, null);
-    return null;
-  }
-
-  let projId: string | null = null;
-
-  try {
-    const projectMdPath = existsSync(join(loDir, "PROJECT.md"))
-      ? join(loDir, "PROJECT.md")
-      : join(loDir, "project.md");
-    const content = readFileSync(projectMdPath, "utf-8");
-    const fm = parseFrontmatter(content);
-    projId = fm.id ?? fm.proj_id ?? null;
-  } catch {
-    // .lo/ exists but no PROJECT.md or project.md — no proj_id available
-  }
+  const fm = readProjectFrontmatter(projectDir);
+  const projId = fm ? (fm.id ?? fm.proj_id ?? null) : null;
 
   projIdCache.set(projectDir, projId);
   return projId;
-}
-
-/**
- * Resolve a project directory path to its content_slug.
- * Convenience alias for resolveSlug() — named explicitly to distinguish
- * from id resolution during the migration period.
- */
-export function resolveContentSlug(projectDir: string): string | null {
-  return resolveSlug(projectDir);
 }
 
 /**

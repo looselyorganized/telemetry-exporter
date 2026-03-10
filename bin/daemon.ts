@@ -56,7 +56,7 @@ import {
   getVisibility,
 } from "../src/visibility-cache";
 import { buildSlugMap, clearSlugCache, resolveProjId, clearProjIdCache } from "../src/project/slug-resolver";
-import { EXPORTER_DIR, PID_FILE } from "../src/cli-output";
+import { PID_FILE, isProcessRunning } from "../src/cli-output";
 import { readFileSync, writeFileSync, existsSync, unlinkSync } from "fs";
 import { join } from "path";
 
@@ -73,16 +73,6 @@ if (!SUPABASE_URL || !SUPABASE_KEY) {
 }
 
 // ─── Single-instance guard (PID file) ───────────────────────────────────────
-
-
-function isProcessRunning(pid: number): boolean {
-  try {
-    process.kill(pid, 0); // signal 0 = check existence
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 if (existsSync(PID_FILE)) {
   const existingPid = parseInt(readFileSync(PID_FILE, "utf-8").trim(), 10);
@@ -359,10 +349,11 @@ async function backfill(): Promise<void> {
 
 async function incrementalSync(): Promise<void> {
   const newEntries = tailer.poll();
-  if (newEntries.length > 0) allSeenEntries.push(...newEntries);
 
   if (newEntries.length > 0) {
+    allSeenEntries.push(...newEntries);
     await ensureProjects(newEntries);
+    cachedModelStats = readModelStats();
 
     const { inserted, errors } = await insertAndTrackActivity(newEntries);
     if (inserted > 0 || errors > 0) {
@@ -374,7 +365,6 @@ async function incrementalSync(): Promise<void> {
 
   // Sync aggregate metrics (tokens, sessions — NOT agent state)
   const statsCache = readStatsCache();
-  if (newEntries.length > 0) cachedModelStats = readModelStats();
   await syncAggregateMetrics(statsCache, cachedModelStats);
 }
 

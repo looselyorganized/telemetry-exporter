@@ -157,25 +157,25 @@ export class ProcessWatcher {
     }
 
     // Facility-level counts also use windowed state
-    const activeProcessPids = state.processes.filter((p) =>
+    const windowActiveProcs = state.processes.filter((p) =>
       this.isWindowActive(p.pid)
     );
-    const activePidProjIds = new Set(activeProcessPids.map((p) => p.projId));
+    const activeProjIds = new Set(windowActiveProcs.map((p) => p.projId));
 
     const uniqueProjIds = new Set(
       state.processes.map((p) => p.projId).filter((s) => s !== "unknown")
     );
     const activeProjects = [...uniqueProjIds].map((projId) => ({
       name: projId,
-      active: activePidProjIds.has(projId),
+      active: activeProjIds.has(projId),
     }));
 
     return {
       events,
       byProject,
       facility: {
-        status: activeProcessPids.length > 0 ? "active" : "dormant",
-        activeAgents: activeProcessPids.length,
+        status: windowActiveProcs.length > 0 ? "active" : "dormant",
+        activeAgents: windowActiveProcs.length,
         activeProjects,
       },
     };

@@ -21,7 +21,6 @@ import {
   pass,
   fail,
   warn,
-  printHeader,
   printCloseBanner,
   isProcessRunning,
   loadEnv,

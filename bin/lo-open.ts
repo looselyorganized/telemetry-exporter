@@ -23,7 +23,6 @@ import {
   fail,
   warn,
   abort,
-  printHeader,
   printOpenBanner,
   isProcessRunning,
   loadEnv,

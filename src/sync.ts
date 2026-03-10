@@ -275,12 +275,17 @@ export async function syncDailyMetrics(statsCache: StatsCache): Promise<number> 
  * Sync per-project daily metrics from JSONL token scan and event aggregates.
  * Upserts rows with project != null into daily_metrics.
  */
+interface DailyKeyData {
+  tokens?: Record<string, number>;
+  events?: { sessions: number; messages: number; toolCalls: number; agentSpawns: number; teamMessages: number };
+}
+
 export async function syncProjectDailyMetrics(
   tokenMap: ProjectTokenMap,
   eventAggregates?: ProjectEventAggregates
 ): Promise<number> {
   // Build a unified set of (project, date) keys from both sources
-  const keys = new Map<string, { tokens?: Record<string, number>; events?: { sessions: number; messages: number; toolCalls: number; agentSpawns: number; teamMessages: number } }>();
+  const keys = new Map<string, DailyKeyData>();
 
   const makeKey = (project: string, date: string) => `${project}\0${date}`;
 
