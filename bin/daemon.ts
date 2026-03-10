@@ -56,8 +56,9 @@ import {
   getVisibility,
 } from "../src/visibility-cache";
 import { buildSlugMap, clearSlugCache, resolveProjId, clearProjIdCache } from "../src/project/slug-resolver";
+import { EXPORTER_DIR, PID_FILE } from "../src/cli-output";
 import { readFileSync, writeFileSync, existsSync, unlinkSync } from "fs";
-import { join, dirname } from "path";
+import { join } from "path";
 
 // ─── Config ────────────────────────────────────────────────────────────────
 
@@ -73,8 +74,6 @@ if (!SUPABASE_URL || !SUPABASE_KEY) {
 
 // ─── Single-instance guard (PID file) ───────────────────────────────────────
 
-const EXPORTER_DIR = join(dirname(new URL(import.meta.url).pathname), "..");
-const PID_FILE = join(EXPORTER_DIR, ".exporter.pid");
 
 function isProcessRunning(pid: number): boolean {
   try {

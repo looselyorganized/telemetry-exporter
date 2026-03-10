@@ -8,9 +8,7 @@ import { existsSync } from "fs";
 import { basename, dirname, join } from "path";
 import { homedir } from "os";
 
-import { resolveProjId } from "../project/slug-resolver";
-
-const PROJECT_ROOT = "/Users/bigviking/Documents/github/projects/lo";
+import { resolveProjId, PROJECT_ROOT } from "../project/slug-resolver";
 
 export interface ClaudeProcess {
   pid: number;

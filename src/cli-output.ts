@@ -6,11 +6,11 @@
  */
 
 import { readFileSync, existsSync } from "fs";
-import { join, dirname } from "path";
+import { join } from "path";
 
 // ─── Paths ──────────────────────────────────────────────────────────────────
 
-export const EXPORTER_DIR = join(dirname(new URL(import.meta.url).pathname), "..");
+export const EXPORTER_DIR = join(import.meta.dirname!, "..");
 export const ENV_FILE = join(EXPORTER_DIR, ".env");
 export const PID_FILE = join(EXPORTER_DIR, ".exporter.pid");
 export const PLIST_NAME = "com.lo.telemetry-exporter.plist";
