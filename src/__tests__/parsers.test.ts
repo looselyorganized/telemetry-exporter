@@ -243,19 +243,15 @@ describe("LogTailer", () => {
 });
 
 describe("readModelStats", () => {
-  // readModelStats reads from a hardcoded MODEL_FILE path, so we test it
-  // by temporarily mocking the module. Instead, we test the parsing logic
-  // is correct by importing and calling with a custom file via a workaround.
-  // Since readModelStats uses a hardcoded path, we test it returns [] on
-  // missing file (the default behavior).
+  // readModelStats reads from a hardcoded MODEL_FILE (~/.claude/model-stats).
+  // We can't redirect it without mock.module (which leaks in Bun).
+  // The parsing logic is thoroughly tested in read-model-stats.test.ts.
+  // Here we verify the function's contract: always returns an array of valid shapes.
 
-  test("returns empty array when model-stats file does not exist", async () => {
-    // Dynamically import to test the default behavior
+  test("returns an array with valid entry shapes", async () => {
     const { readModelStats } = await import("../parsers");
-    // This will either return data (if ~/.claude/model-stats exists) or []
     const result = readModelStats();
     expect(Array.isArray(result)).toBe(true);
-    // Each entry should have the right shape if any exist
     for (const entry of result) {
       expect(entry).toHaveProperty("model");
       expect(entry).toHaveProperty("total");

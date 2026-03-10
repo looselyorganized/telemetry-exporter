@@ -246,20 +246,23 @@ describe("computeTokensByProject", () => {
 // ─── resolveProjectName ─────────────────────────────────────────────────────
 
 describe("resolveProjectName", () => {
+  // Derive PROJECT_ROOT dynamically from the repo checkout location
+  // so tests work in any environment (local dev, CI, etc.)
+  const repoRoot = import.meta.dirname!.replace(/\/src\/project\/__tests__$/, "");
+  const projectRoot = repoRoot.replace(/\/[^/]+$/, ""); // parent of repo = LO project root
+  const encodedRoot = projectRoot.replace(/\//g, "-");
+  const repoName = repoRoot.split("/").pop()!;
+
   test("returns null for unrecognized encoded dir name", () => {
     expect(resolveProjectName("some-random-path")).toBeNull();
   });
 
   test("returns null for org root without trailing project", () => {
-    // The org root itself should not match (no trailing "-<project>")
-    const encodedRoot = "/Users/bigviking/Documents/github/projects/lo".replace(/\//g, "-");
     expect(resolveProjectName(encodedRoot)).toBeNull();
   });
 
   test("resolves encoded dir name to project name for real projects on disk", () => {
-    const encodedRoot = "/Users/bigviking/Documents/github/projects/lo".replace(/\//g, "-");
-    // telemetry-exporter should exist on disk
-    const result = resolveProjectName(`${encodedRoot}-telemetry-exporter`);
-    expect(result).toBe("telemetry-exporter");
+    const result = resolveProjectName(`${encodedRoot}-${repoName}`);
+    expect(result).toBe(repoName);
   });
 });

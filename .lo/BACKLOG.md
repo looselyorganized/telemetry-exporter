@@ -6,7 +6,7 @@ updated: 2026-03-10
 
 - [ ] f001 Test Coverage
   Retroactive test coverage for core project logic. Generated during Explore → Build transition.
-  [active](.lo/work/f001-test-coverage/)
+  [active](work/f001-test-coverage/)
 
 ## Tasks
 

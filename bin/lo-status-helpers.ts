@@ -29,8 +29,10 @@ export function parseFrontmatter(content: string): Record<string, string> {
     if (colonIdx === -1) continue;
     const k = trimmed.slice(0, colonIdx).trim();
     let v = trimmed.slice(colonIdx + 1).trim();
-    // Strip inline YAML comments (e.g. "explore"  # comment)
+    // Strip inline YAML comments from quoted values (e.g. "explore"  # comment)
     v = v.replace(/^["']([^"']*)["']\s*#.*$/, "$1");
+    // Strip inline YAML comments from unquoted values (e.g. explore # comment)
+    v = v.replace(/\s+#.*$/, "");
     v = v.replace(/^["']|["']$/g, "");
     meta[k] = v;
   }
@@ -51,7 +53,7 @@ export function parseBacklogFeatures(content: string): Feature[] {
     const name = match[2].trim();
 
     let status = "backlog";
-    for (let j = i + 1; j < Math.min(i + 5, lines.length); j++) {
+    for (let j = i + 1; j < Math.min(i + 6, lines.length); j++) {
       const statusMatch = lines[j].match(/^Status:\s*(.+)/i);
       if (statusMatch) {
         status = statusMatch[1].trim().toLowerCase();

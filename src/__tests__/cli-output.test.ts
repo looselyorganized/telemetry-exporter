@@ -69,12 +69,12 @@ describe("loadEnv (.env parsing)", () => {
     const content = [
       "# Supabase config",
       "SUPABASE_URL=https://abc.supabase.co",
-      "SUPABASE_SECRET_KEY=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9",
+      "SUPABASE_SECRET_KEY=test-secret-key-placeholder-not-real",
       "LO_PROJECT_ROOT=/Users/me/projects/lo",
     ].join("\n");
     const result = parseEnvContent(content);
     expect(result.SUPABASE_URL).toBe("https://abc.supabase.co");
-    expect(result.SUPABASE_SECRET_KEY).toStartWith("eyJ");
+    expect(result.SUPABASE_SECRET_KEY).toBe("test-secret-key-placeholder-not-real");
     expect(result.LO_PROJECT_ROOT).toBe("/Users/me/projects/lo");
   });
 });

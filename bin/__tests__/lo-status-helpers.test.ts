@@ -35,6 +35,15 @@ status: "explore"  # this is a comment
     expect(result.status).toBe("explore");
   });
 
+  test("strips inline YAML comments from unquoted values", () => {
+    const content = `---
+status: explore # this is a comment
+---`;
+
+    const result = parseFrontmatter(content);
+    expect(result.status).toBe("explore");
+  });
+
   test("skips comment lines", () => {
     const content = `---
 # This is a comment

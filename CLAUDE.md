@@ -17,7 +17,7 @@ bun run close                        # graceful facility shutdown
 bun run status                       # cross-project backlog scanner
 ```
 
-No tests, no linter, no tsconfig. Single dependency: `@supabase/supabase-js`.
+No linter, no tsconfig. Single dependency: `@supabase/supabase-js`. Tests: `bun test`.
 
 ## Architecture
 
@@ -45,7 +45,7 @@ src/           Library code
 ### Key Data Flow
 
 1. `parsers.ts` reads `~/.claude/events.log` (pipe-delimited, emoji-tagged lines)
-2. `project/slug-resolver.ts` maps directory names to project ids using `.lo/PROJECT.md` frontmatter
+2. `project/slug-resolver.ts` maps directory paths to project ids using `.lo/PROJECT.md` frontmatter
 3. `project/scanner.ts` scans `~/.claude/projects/*/` JSONL files for per-project token usage
 4. `process/scanner.ts` → `process/watcher.ts` detects running Claude instances and activity state
 5. `sync.ts` pushes everything to Supabase tables: `events`, `projects`, `daily_metrics`, `facility_status`, `project_telemetry`

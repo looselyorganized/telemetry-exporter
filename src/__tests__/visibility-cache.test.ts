@@ -10,10 +10,10 @@ import { join } from "path";
  * 1. mock.module("child_process") — but this leaks across Bun test files
  * 2. Running with `gh` available — flaky in CI
  *
- * Instead, we test the core logic patterns:
- * - Cache file parsing (JSON → Record<string, "public" | "private">)
- * - GitHub output parsing (name isPrivate → visibility)
- * - Default-to-private behavior
+ * Instead, we test the core logic patterns that getVisibility uses internally.
+ * These are integration-style contract tests: if the logic here matches what
+ * visibility-cache.ts does, regressions in the parsing/defaulting will be caught.
+ * A full integration test requires a running `gh` CLI and is out of scope for unit tests.
  */
 
 describe("getVisibility (logic patterns)", () => {

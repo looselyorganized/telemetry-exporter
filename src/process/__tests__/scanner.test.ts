@@ -24,10 +24,12 @@ describe("deriveProjectName", () => {
   });
 
   test("finds git root by walking up", () => {
-    // The repo we're in has a .git at the telemetry-exporter root
-    const cwd = "/Users/bigviking/Documents/github/projects/lo/telemetry-exporter/src/process";
+    // Use the actual repo path dynamically so this works in any checkout location
+    const repoRoot = import.meta.dirname!.replace(/\/src\/process\/__tests__$/, "");
+    const cwd = `${repoRoot}/src/process`;
     const result = deriveProjectName(cwd);
-    expect(result).toBe("telemetry-exporter");
+    // basename of the git root should be the project name
+    expect(result).toBe(repoRoot.split("/").pop());
   });
 
   test("falls back to projects/ heuristic when no .git found", () => {
