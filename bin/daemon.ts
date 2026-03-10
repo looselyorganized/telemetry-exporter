@@ -6,8 +6,8 @@
  * for the Loosely Organized operations dashboard.
  *
  * Usage:
- *   bun run index.ts              # Start the daemon (incremental sync)
- *   bun run index.ts --backfill   # Backfill all historical data, then run daemon
+ *   bun run bin/daemon.ts              # Start the daemon (incremental sync)
+ *   bun run bin/daemon.ts --backfill   # Backfill all historical data, then run daemon
  */
 
 import {
@@ -15,9 +15,9 @@ import {
   readModelStats,
   readStatsCache,
   type LogEntry,
-} from "./parsers";
-import { getFacilityState } from "./process-scanner";
-import { scanProjectTokens, computeTokensByProject } from "./project-scanner";
+} from "../src/parsers";
+import { getFacilityState } from "../src/process/scanner";
+import { scanProjectTokens, computeTokensByProject } from "../src/project/scanner";
 import {
   initSupabase,
   getSupabase,
@@ -37,13 +37,13 @@ import {
   type FacilityMetricsUpdate,
   type ProjectTelemetryUpdate,
   type ProjectEventAggregates,
-} from "./sync";
-import { ProcessWatcher } from "./process-watcher";
+} from "../src/sync";
+import { ProcessWatcher } from "../src/process/watcher";
 import {
   loadVisibilityCache,
   getVisibility,
-} from "./visibility-cache";
-import { buildSlugMap, clearSlugCache, resolveProjId, clearProjIdCache } from "./slug-resolver";
+} from "../src/visibility-cache";
+import { buildSlugMap, clearSlugCache, resolveProjId, clearProjIdCache } from "../src/project/slug-resolver";
 import { readFileSync, writeFileSync, existsSync, unlinkSync } from "fs";
 import { join, dirname } from "path";
 
@@ -61,7 +61,8 @@ if (!SUPABASE_URL || !SUPABASE_KEY) {
 
 // ─── Single-instance guard (PID file) ───────────────────────────────────────
 
-const PID_FILE = join(dirname(new URL(import.meta.url).pathname), ".exporter.pid");
+const EXPORTER_DIR = join(dirname(new URL(import.meta.url).pathname), "..");
+const PID_FILE = join(EXPORTER_DIR, ".exporter.pid");
 
 function isProcessRunning(pid: number): boolean {
   try {

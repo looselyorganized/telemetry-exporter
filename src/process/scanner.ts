@@ -8,7 +8,7 @@ import { existsSync } from "fs";
 import { basename, dirname, join } from "path";
 import { homedir } from "os";
 
-import { resolveProjId } from "./slug-resolver";
+import { resolveProjId } from "../project/slug-resolver";
 
 const PROJECT_ROOT = "/Users/bigviking/Documents/github/projects/lo";
 

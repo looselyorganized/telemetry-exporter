@@ -9,7 +9,7 @@
 	<array>
 		<string>/Users/bigviking/.bun/bin/bun</string>
 		<string>run</string>
-		<string>index.ts</string>
+		<string>bin/daemon.ts</string>
 	</array>
 
 	<key>WorkingDirectory</key>

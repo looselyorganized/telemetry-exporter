@@ -9,7 +9,7 @@
  * (a short burst of real work fills the threshold quickly).
  */
 
-import { getFacilityState } from "./process-scanner";
+import { getFacilityState } from "./scanner";
 
 /** How many recent ticks to consider (at 250ms each, 40 = 10 seconds). */
 const WINDOW_SIZE = 40;

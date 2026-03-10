@@ -5,12 +5,12 @@
  * Scans all LO projects and prints open work (features + tasks).
  *
  * Usage:
- *   bun run lo-status.ts
+ *   bun run bin/lo-status.ts
  */
 
 import { readFileSync, existsSync, readdirSync } from "fs";
 import { join } from "path";
-import { DIM, RESET, BOLD, EXPORTER_DIR } from "./cli-output";
+import { DIM, RESET, BOLD, EXPORTER_DIR } from "../src/cli-output";
 
 // ─── .env Parsing (just LO_PROJECT_ROOT, no Supabase) ──────────────────────
 

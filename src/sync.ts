@@ -5,8 +5,8 @@
 
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import type { LogEntry, ModelStats, StatsCache } from "./parsers";
-import type { ProcessDiff } from "./process-watcher";
-import type { ProjectTokenMap } from "./project-scanner";
+import type { ProcessDiff } from "./process/watcher";
+import type { ProjectTokenMap } from "./project/scanner";
 
 // ─── Shared types ─────────────────────────────────────────────────────────
 

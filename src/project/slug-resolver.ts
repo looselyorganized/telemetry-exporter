@@ -11,7 +11,7 @@
  */
 
 import { existsSync, readdirSync, readFileSync, statSync } from "fs";
-import { basename, dirname, join } from "path";
+import { basename, join } from "path";
 
 const PROJECT_ROOT =
   "/Users/bigviking/Documents/github/projects/lo";
@@ -165,7 +165,9 @@ export function loadLegacyMapping(): Map<string, string> {
 
   try {
     const mappingPath = join(
-      dirname(new URL(import.meta.url).pathname),
+      import.meta.dirname!,
+      "..",
+      "..",
       ".project-mapping.json"
     );
     const raw = JSON.parse(readFileSync(mappingPath, "utf-8"));
