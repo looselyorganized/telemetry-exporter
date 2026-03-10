@@ -19,7 +19,7 @@ import { resolveProjId, loadLegacyMapping } from "./slug-resolver";
 // ─── Constants ──────────────────────────────────────────────────────────────
 
 const PROJECTS_DIR = join(homedir(), ".claude", "projects");
-const PROJECT_ROOT = "/Users/bigviking/Documents/github/projects/lo";
+const PROJECT_ROOT = process.env.LO_PROJECT_ROOT || "/Users/bigviking/Documents/github/projects/lo";
 const LEGACY_ROOT = "/Users/bigviking/Documents/github/projects/looselyorganized";
 const ENCODED_ROOTS = [PROJECT_ROOT, LEGACY_ROOT].map((r) => r.replace(/\//g, "-"));
 

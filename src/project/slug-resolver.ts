@@ -14,7 +14,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from "fs";
 import { basename, join } from "path";
 
 const PROJECT_ROOT =
-  "/Users/bigviking/Documents/github/projects/lo";
+  process.env.LO_PROJECT_ROOT || "/Users/bigviking/Documents/github/projects/lo";
 
 const slugCache = new Map<string, string | null>();
 const projIdCache = new Map<string, string | null>();

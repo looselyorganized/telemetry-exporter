@@ -10,7 +10,7 @@ import { homedir } from "os";
 
 import { resolveProjId } from "../project/slug-resolver";
 
-const PROJECT_ROOT = "/Users/bigviking/Documents/github/projects/lo";
+const PROJECT_ROOT = process.env.LO_PROJECT_ROOT || "/Users/bigviking/Documents/github/projects/lo";
 
 export interface ClaudeProcess {
   pid: number;
