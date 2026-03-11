@@ -11,7 +11,8 @@ import {
   resolveProjectName,
   type ProjectTokenMap,
 } from "../scanner";
-import { clearSlugCache, clearProjIdCache } from "../slug-resolver";
+import { clearSlugCache, clearProjIdCache, PROJECT_ROOT } from "../slug-resolver";
+import { existsSync } from "fs";
 
 let tmpDir: string;
 
@@ -261,8 +262,16 @@ describe("resolveProjectName", () => {
     expect(resolveProjectName(encodedRoot)).toBeNull();
   });
 
-  test("resolves encoded dir name to project name for real projects on disk", () => {
-    const result = resolveProjectName(`${encodedRoot}-${repoName}`);
-    expect(result).toBe(repoName);
-  });
+  // This test depends on the actual PROJECT_ROOT matching the checkout location
+  // and the repo directory existing on disk — skip gracefully in CI or other envs.
+  const canResolveOnDisk =
+    projectRoot === PROJECT_ROOT && existsSync(join(PROJECT_ROOT, repoName));
+
+  test.skipIf(!canResolveOnDisk)(
+    "resolves encoded dir name to project name for real projects on disk",
+    () => {
+      const result = resolveProjectName(`${encodedRoot}-${repoName}`);
+      expect(result).toBe(repoName);
+    },
+  );
 });
