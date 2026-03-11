@@ -55,7 +55,7 @@ import {
   loadVisibilityCache,
   getVisibility,
 } from "../src/visibility-cache";
-import { buildSlugMap, clearSlugCache, resolveProjId, clearProjIdCache } from "../src/project/slug-resolver";
+import { buildSlugMap, clearSlugCache, resolveProjId, clearProjIdCache, PROJECT_ROOT } from "../src/project/slug-resolver";
 import { PID_FILE, isProcessRunning } from "../src/cli-output";
 import { readFileSync, writeFileSync, existsSync, unlinkSync } from "fs";
 import { join } from "path";
@@ -123,8 +123,6 @@ let slugMap: Map<string, string> = new Map();
 
 // Directory name → projId mapping, refreshed every 60 cycles
 let projIdMap: Map<string, string> = new Map();
-
-const PROJECT_ROOT = process.env.LO_PROJECT_ROOT || "/Users/bigviking/Documents/github/projects/lo";
 
 // Org-root directory names that should map to the org-root project
 const ORG_ROOT_ID = "proj_org-root";
@@ -406,11 +404,9 @@ async function syncFacilityStatus(
   const agentsByProject: Record<string, { count: number; active: number }> = {};
   for (const proc of facility.processes) {
     if (proc.projId === "unknown") continue;
-    if (!agentsByProject[proc.projId]) {
-      agentsByProject[proc.projId] = { count: 0, active: 0 };
-    }
-    agentsByProject[proc.projId].count++;
-    if (proc.isActive) agentsByProject[proc.projId].active++;
+    const entry = agentsByProject[proc.projId] ??= { count: 0, active: 0 };
+    entry.count++;
+    if (proc.isActive) entry.active++;
   }
 
   const update: FacilityUpdate = {

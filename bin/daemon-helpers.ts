@@ -5,6 +5,9 @@
  */
 
 import type { LogEntry, ModelStats } from "../src/parsers";
+import type { ProjectEventAggregates } from "../src/sync";
+
+export type { ProjectEventAggregates };
 
 // ─── Types (shared with daemon.ts) ──────────────────────────────────────────
 
@@ -26,12 +29,6 @@ export interface ProjectTelemetryInput {
   lifetimeCounters: Record<string, LifetimeCounters>;
   todayTokensByProject: Record<string, TodayTokens>;
 }
-
-/** projId → date → { sessions, messages, toolCalls, agentSpawns, teamMessages } */
-export type ProjectEventAggregates = Map<
-  string,
-  Map<string, LifetimeCounters>
->;
 
 // ─── Formatting ─────────────────────────────────────────────────────────────
 

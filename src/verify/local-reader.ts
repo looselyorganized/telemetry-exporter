@@ -99,13 +99,14 @@ function readLocalEvents(projIdMap: Map<string, string>): LocalEventsResult {
     }
   }
 
-  // Use the later of: 14-day retention window or log start date
+  // Use the later of: 14-day retention window or log start date,
   // so we only compare the range both sides actually have data for
   const retentionCutoff = new Date();
   retentionCutoff.setDate(retentionCutoff.getDate() - 14);
-  const effectiveCutoff = logStartDate && logStartDate > retentionCutoff
-    ? logStartDate
-    : retentionCutoff;
+  const effectiveCutoff =
+    logStartDate && logStartDate > retentionCutoff
+      ? logStartDate
+      : retentionCutoff;
 
   // Deduplicate using the same conflict key as Supabase upsert:
   // (project_id, event_type, event_text, timestamp)

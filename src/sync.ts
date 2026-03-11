@@ -74,7 +74,7 @@ export async function upsertProject(
     .select("local_names")
     .single();
 
-  let localNames: string[] | null = data?.local_names as string[] ?? null;
+  let localNames: string[] | null = (data?.local_names as string[] | undefined) ?? null;
 
   if (error) {
     // Upsert failed (e.g. first_seen immutable) — fall back to updating last_active
@@ -88,7 +88,7 @@ export async function upsertProject(
       console.error(`  Failed to register project ${projId}:`, error.message);
       return;
     }
-    localNames = fallback?.local_names as string[] ?? null;
+    localNames = (fallback?.local_names as string[] | undefined) ?? null;
   }
 
   // Merge localName into local_names if it's not already present

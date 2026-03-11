@@ -62,7 +62,6 @@ export interface RemoteData {
  * time range where both local and remote have data.
  */
 async function readRemoteEvents(supabase: SupabaseClient, cutoff: Date): Promise<{ data: RemoteEvents; ok: boolean }> {
-
   const byProjectDate: Record<string, Record<string, number>> = {};
   let totalCount = 0;
   let offset = 0;

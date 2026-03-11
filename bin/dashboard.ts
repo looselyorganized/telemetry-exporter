@@ -10,8 +10,8 @@
  */
 
 import { createClient } from "@supabase/supabase-js";
-import { readAllLocal } from "../src/verify/local-reader";
-import { readAllRemote } from "../src/verify/remote-reader";
+import { readAllLocal, type LocalData } from "../src/verify/local-reader";
+import { readAllRemote, type RemoteData } from "../src/verify/remote-reader";
 import {
   compareEvents,
   compareMetrics,
@@ -31,9 +31,6 @@ const supabase = createClient(url, key, {
 });
 
 // ─── Snapshot cache (coalesces concurrent requests) ─────────────────────────
-
-import type { LocalData } from "../src/verify/local-reader";
-import type { RemoteData } from "../src/verify/remote-reader";
 
 let cachedSnapshot: { local: LocalData; remote: RemoteData; ts: number } | null = null;
 const CACHE_TTL = 5_000;
@@ -78,9 +75,7 @@ async function handleHealth(): Promise<Response> {
   return Response.json(buildHealth(local, remote));
 }
 
-async function handleCompare(
-  type: string
-): Promise<Response> {
+async function handleCompare(type: string): Promise<Response> {
   const { local, remote } = await getSnapshot();
 
   const compareFns: Record<string, () => ReturnType<typeof compareEvents>> = {

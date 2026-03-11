@@ -4,6 +4,10 @@
  * that prevent direct import in tests.
  */
 
+import { parseFrontmatter } from "../src/project/slug-resolver";
+
+export { parseFrontmatter };
+
 export interface Feature {
   id: string;
   name: string;
@@ -13,30 +17,6 @@ export interface Feature {
 export interface Task {
   id: string;
   text: string;
-}
-
-/** Parse YAML frontmatter from a markdown string. Handles quoted values and inline YAML comments. */
-export function parseFrontmatter(content: string): Record<string, string> {
-  const meta: Record<string, string> = {};
-  if (!content.startsWith("---")) return meta;
-  const end = content.indexOf("---", 3);
-  if (end === -1) return meta;
-  const block = content.slice(3, end);
-  for (const line of block.split("\n")) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("#")) continue;
-    const colonIdx = trimmed.indexOf(":");
-    if (colonIdx === -1) continue;
-    const k = trimmed.slice(0, colonIdx).trim();
-    let v = trimmed.slice(colonIdx + 1).trim();
-    // Strip inline YAML comments from quoted values (e.g. "explore"  # comment)
-    v = v.replace(/^["']([^"']*)["']\s*#.*$/, "$1");
-    // Strip inline YAML comments from unquoted values (e.g. explore # comment)
-    v = v.replace(/\s+#.*$/, "");
-    v = v.replace(/^["']|["']$/g, "");
-    meta[k] = v;
-  }
-  return meta;
 }
 
 /** Parse ### fNNN headings with Status: lines from backlog content. Skips done features. */
