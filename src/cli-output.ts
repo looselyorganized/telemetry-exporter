@@ -115,6 +115,23 @@ export function printCloseBanner(): void {
   console.log();
 }
 
+// ─── Plugin Version ─────────────────────────────────────────────────────────
+
+const INSTALLED_PLUGINS_FILE = join(
+  process.env.HOME!,
+  ".claude/plugins/installed_plugins.json"
+);
+
+export function getLoPluginVersion(): string {
+  try {
+    const raw = JSON.parse(readFileSync(INSTALLED_PLUGINS_FILE, "utf-8"));
+    const entry = raw?.plugins?.["lo@looselyorganized"]?.[0];
+    return entry?.version ?? "unknown";
+  } catch {
+    return "unknown";
+  }
+}
+
 // ─── Utilities ──────────────────────────────────────────────────────────────
 
 export function isProcessRunning(pid: number): boolean {

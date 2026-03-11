@@ -29,6 +29,7 @@ import {
   printOpenBanner,
   isProcessRunning,
   loadEnv,
+  getLoPluginVersion,
 } from "../src/cli-output";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -248,24 +249,9 @@ async function checkExporter(): Promise<number> {
   );
 }
 
-async function fetchAgentTotals(
-  supabase: SupabaseClient
-): Promise<{ activeAgents: number; agentCount: number }> {
-  const { data: rows } = await supabase
-    .from("project_telemetry")
-    .select("active_agents, agent_count");
-
-  const agentCount =
-    rows?.reduce((sum, r) => sum + (Number(r.agent_count) || 0), 0) ?? 0;
-  const activeAgents =
-    rows?.reduce((sum, r) => sum + (Number(r.active_agents) || 0), 0) ?? 0;
-
-  return { activeAgents, agentCount };
-}
-
 async function checkTelemetry(
   supabase: SupabaseClient
-): Promise<{ updatedAt: string; activeAgents: number; agentCount: number }> {
+): Promise<void> {
   const { data: first, error: err1 } = await supabase
     .from("facility_status")
     .select("updated_at, active_agents")
@@ -282,9 +268,8 @@ async function checkTelemetry(
 
   // If updated very recently (< 10s), trust it without waiting
   if (firstAge < 10_000) {
-    const agents = await fetchAgentTotals(supabase);
     pass("Telemetry", `Data flowing (updated ${Math.round(firstAge / 1000)}s ago)`);
-    return { updatedAt: first.updated_at as string, ...agents };
+    return;
   }
 
   // Wait 6s (slightly longer than the 5s aggregate cycle) and check again
@@ -305,10 +290,9 @@ async function checkTelemetry(
   const secondUpdated = new Date(second.updated_at as string);
 
   if (secondUpdated > firstUpdated) {
-    const agents = await fetchAgentTotals(supabase);
     const age = Math.round((Date.now() - secondUpdated.getTime()) / 1000);
     pass("Telemetry", `Data flowing (updated ${age}s ago)`);
-    return { updatedAt: second.updated_at as string, ...agents };
+    return;
   }
 
   fail(
@@ -402,20 +386,14 @@ async function main(): Promise<void> {
   await checkSite();
   await checkLaunchd();
   const pid = await checkExporter();
-  const telemetry = await checkTelemetry(supabase);
+  await checkTelemetry(supabase);
   await flipFacilityOpen(supabase);
   await launchDashboard();
 
-  const ago = Math.round(
-    (Date.now() - new Date(telemetry.updatedAt).getTime()) / 1000
-  );
   console.log();
   console.log(`  ${DIM}── Facility Open ──────────────────────${RESET}`);
+  console.log(`  ${BOLD}lo-plugin:${RESET} v${getLoPluginVersion()}`);
   console.log(`  ${BOLD}Exporter:${RESET} PID ${pid} (launchd managed)`);
-  console.log(
-    `  ${BOLD}Agents:${RESET} ${telemetry.agentCount} instances, ${telemetry.activeAgents} active`
-  );
-  console.log(`  ${BOLD}Last sync:${RESET} ${ago}s ago`);
   console.log(`  ${DIM}Run lo-status for project backlogs${RESET}`);
   console.log();
 }
