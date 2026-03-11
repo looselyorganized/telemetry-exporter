@@ -4,6 +4,33 @@ type: stream
 
 <entry>
 date: 2026-03-10
+title: "v0.1.0 release"
+commits: 8
+<description>
+Tagged v0.1.0 with event RCA fixes (14-day window alignment, dedup via Supabase conflict key, log start date detection), org-root project creation and daemon tracking, dashboard lifecycle wired into lo-open/lo-close, and concierge UUID migration. First versioned release.
+</description>
+</entry>
+
+<entry>
+date: 2026-03-10
+title: "Comprehensive test coverage"
+commits: 5
+<description>
+218 tests across 11 files covering parsers, process scanner/watcher, project scanner/slug-resolver, CLI output, visibility cache, comparator, and extracted helpers. CodeRabbit review addressed CI-resilient test skipping for path-dependent assertions.
+</description>
+</entry>
+
+<entry>
+date: 2026-03-10
+title: "Code simplification and branch cleanup"
+commits: 6
+<description>
+Deduplicated type definitions (ProjectEventAggregates, parseFrontmatter, PROJECT_ROOT) across daemon-helpers, lo-status-helpers, and slug-resolver. Fixed operator precedence on Supabase type casts. Merged all feature branches to main, deleted stale remotes, cleared completed backlog.
+</description>
+</entry>
+
+<entry>
+date: 2026-03-10
 title: "Telemetry verification dashboard and event RCA"
 <description>
 Built a local verification dashboard (bin/dashboard.ts) comparing events.log against Supabase side-by-side across five dimensions — events, metrics, tokens, models, projects. RCA on event divergence uncovered three root causes: 14-day pruning vs 30-day comparison window, duplicate log line counting, and 3,658 misattributed org-root events stored under the platform projId. Created a new proj_org-root project, re-attributed stale events, backfilled 14K org-root entries, and wired the daemon to track looselyorganized/lo directory names going forward.
