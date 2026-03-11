@@ -1,0 +1,5 @@
+id: "proj_fc236751-369a-4b23-847e-577e06753eee"
+title: "Telemetry Exporter"
+description: "Bun daemon that syncs Claude Code telemetry from ~/.claude/ to Supabase for the LO operations dashboard."
+status: "build"
+state: "private"
