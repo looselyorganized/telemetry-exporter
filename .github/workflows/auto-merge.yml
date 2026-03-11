@@ -5,10 +5,6 @@ on:
     types: [opened]
     branches: [main]
 
-permissions:
-  contents: write
-  pull-requests: write
-
 jobs:
   enable-auto-merge:
     runs-on: ubuntu-latest
