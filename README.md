@@ -22,6 +22,9 @@ bun run bin/daemon.ts --backfill
 bun run bin/lo-open.ts    # start facility + preflight checks
 bun run bin/lo-close.ts   # stop facility
 bun run bin/lo-status.ts  # cross-project backlog scanner
+
+# Verification dashboard (opens localhost:7777)
+bun run bin/dashboard.ts
 ```
 
 ## launchd (auto-start on login)
@@ -61,3 +64,4 @@ Logs go to `~/.claude/lo-exporter.log` and `~/.claude/lo-exporter.err`.
 | `SUPABASE_URL` | Yes | Supabase project URL |
 | `SUPABASE_SECRET_KEY` | Yes | Supabase service role key |
 | `LO_PROJECT_ROOT` | No | Parent directory of all LO project repos |
+| `DASHBOARD_PORT` | No | Port for verification dashboard (default: 7777) |

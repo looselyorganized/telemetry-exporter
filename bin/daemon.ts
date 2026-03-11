@@ -126,6 +126,10 @@ let projIdMap: Map<string, string> = new Map();
 
 const PROJECT_ROOT = process.env.LO_PROJECT_ROOT || "/Users/bigviking/Documents/github/projects/lo";
 
+// Org-root directory names that should map to the org-root project
+const ORG_ROOT_ID = "proj_org-root";
+const ORG_ROOT_NAMES = ["looselyorganized", "lo"];
+
 async function refreshMaps(): Promise<void> {
   clearSlugCache();
   clearProjIdCache();
@@ -135,6 +139,12 @@ async function refreshMaps(): Promise<void> {
   for (const [dirName] of slugMap) {
     const projId = resolveProjId(join(PROJECT_ROOT, dirName));
     if (projId) projIdMap.set(dirName, projId);
+  }
+
+  // Map org-root directory names so events from the parent dir are tracked
+  for (const name of ORG_ROOT_NAMES) {
+    projIdMap.set(name, ORG_ROOT_ID);
+    slugMap.set(name, "org-root");
   }
 
   console.log(`  Project maps: ${projIdMap.size} projects mapped`);

@@ -13,6 +13,7 @@ import { join } from "path";
 export const EXPORTER_DIR = join(import.meta.dirname!, "..");
 export const ENV_FILE = join(EXPORTER_DIR, ".env");
 export const PID_FILE = join(EXPORTER_DIR, ".exporter.pid");
+export const DASHBOARD_PID_FILE = join(EXPORTER_DIR, ".dashboard.pid");
 export const PLIST_NAME = "com.lo.telemetry-exporter.plist";
 export const PLIST_SOURCE = join(EXPORTER_DIR, PLIST_NAME);
 export const PLIST_DEST = join(
@@ -61,15 +62,6 @@ export function abort(reason: string, hint?: string): never {
   if (hint) console.log(`  ${DIM}${hint}${RESET}`);
   console.log();
   process.exit(1);
-}
-
-export function printHeader(title: string): void {
-  const padded = title.padEnd(39);
-  console.log();
-  console.log(`${DIM}┌─────────────────────────────────────────┐${RESET}`);
-  console.log(`${DIM}│${RESET}  ${BOLD}${padded}${RESET}${DIM}│${RESET}`);
-  console.log(`${DIM}└─────────────────────────────────────────┘${RESET}`);
-  console.log();
 }
 
 // ─── LORF Banner ────────────────────────────────────────────────────────────

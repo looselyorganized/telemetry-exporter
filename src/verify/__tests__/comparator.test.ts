@@ -22,6 +22,7 @@ function makeLocalData(overrides: Partial<LocalData> = {}): LocalData {
     projects: [],
     hourDistribution: {},
     daemon: { running: false, pid: null },
+    logStartDate: null,
     ...overrides,
   };
 }

@@ -10,10 +10,11 @@
  *      same slug (e.g. projects/nexus vs projects/looselyorganized/nexus)
  */
 
-import { readdirSync, readFileSync, statSync } from "fs";
+import { readdirSync, readFileSync } from "fs";
 import { homedir } from "os";
 import { join } from "path";
 
+import { isDirectory } from "../utils";
 import { resolveProjId, loadLegacyMapping, normalizeFsPath, PROJECT_ROOT } from "./slug-resolver";
 
 // ─── Constants ──────────────────────────────────────────────────────────────
@@ -33,14 +34,6 @@ interface JsonlFile {
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
-
-function isDirectory(path: string): boolean {
-  try {
-    return statSync(path).isDirectory();
-  } catch {
-    return false;
-  }
-}
 
 /** Read subdirectory names from PROJECT_ROOT, sorted longest-first for prefix matching. */
 function readProjectDirs(): string[] {

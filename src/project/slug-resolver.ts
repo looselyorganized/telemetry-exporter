@@ -10,9 +10,11 @@
  * 2. Legacy/orphan dirs: static mapping in .project-mapping.json (encoded path → id)
  */
 
-import { existsSync, readdirSync, readFileSync, statSync } from "fs";
+import { existsSync, readdirSync, readFileSync } from "fs";
 import { homedir } from "os";
 import { basename, join, normalize } from "path";
+
+import { isDirectory } from "../utils";
 
 /**
  * Normalize a filesystem path: expand a leading "~" to the user's home
@@ -32,7 +34,8 @@ const slugCache = new Map<string, string | null>();
 const projIdCache = new Map<string, string | null>();
 let legacyMappingCache: Map<string, string> | null = null;
 
-/** Minimal YAML frontmatter parser — extracts key: value pairs between --- fences. */
+/** Minimal YAML frontmatter parser — extracts key: value pairs between --- fences.
+ *  Handles quoted values and inline YAML comments. */
 export function parseFrontmatter(content: string): Record<string, string> {
   const match = content.match(/^---\s*\n([\s\S]*?)\n---/);
   if (!match) return {};
@@ -41,18 +44,16 @@ export function parseFrontmatter(content: string): Record<string, string> {
   for (const line of match[1].split("\n")) {
     const kv = line.match(/^(\w[\w-]*)\s*:\s*(.+)/);
     if (kv) {
-      result[kv[1]] = kv[2].replace(/^["']|["']$/g, "").trim();
+      let v = kv[2].trim();
+      // Strip inline YAML comments from quoted values (e.g. "explore"  # comment)
+      v = v.replace(/^["']([^"']*)["']\s*#.*$/, "$1");
+      // Strip inline YAML comments from unquoted values (e.g. explore # comment)
+      v = v.replace(/\s+#.*$/, "");
+      v = v.replace(/^["']|["']$/g, "");
+      result[kv[1]] = v;
     }
   }
   return result;
-}
-
-function isDirectory(path: string): boolean {
-  try {
-    return statSync(path).isDirectory();
-  } catch {
-    return false;
-  }
 }
 
 /** Read and parse the PROJECT.md frontmatter from a .lo/ directory, or null if not found. */
@@ -93,7 +94,7 @@ export function resolveSlug(projectDir: string): string | null {
 /**
  * Build a complete directory-name-to-slug mapping.
  * Only includes LO projects (those with .lo/ directories).
- * Called at startup + refreshed every 10 cycles (5 min at 30s intervals).
+ * Called at startup + refreshed every 60 cycles (5 min at 5s intervals).
  */
 export function buildSlugMap(): Map<string, string> {
   const map = new Map<string, string>();

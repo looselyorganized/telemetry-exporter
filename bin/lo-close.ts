@@ -15,6 +15,7 @@ import { $ } from "bun";
 import {
   PLIST_DEST,
   PID_FILE,
+  DASHBOARD_PID_FILE,
   DIM,
   RESET,
   BOLD,
@@ -60,13 +61,17 @@ async function main(): Promise<void> {
     } catch {}
   }
 
-  // 3. Unload launchd service (prevents auto-restart)
+  // 3. Stop dashboard
+  await stopDashboard();
+
+  // 4. Unload launchd service (prevents auto-restart)
   await unloadLaunchd();
 
   // Summary
   console.log();
   console.log(`  ${DIM}── Facility Closed ────────────────────${RESET}`);
   console.log(`  ${BOLD}Exporter:${RESET} stopped`);
+  console.log(`  ${BOLD}Dashboard:${RESET} stopped`);
   console.log(`  ${BOLD}Launchd:${RESET} unloaded (lo-open will reload)`);
   console.log();
 }
@@ -108,6 +113,36 @@ async function stopExporter(): Promise<void> {
     pass("Exporter", `Stopped (PID ${pid})`);
   } else {
     fail("Exporter", `PID ${pid} could not be killed`);
+  }
+}
+
+async function stopDashboard(): Promise<void> {
+  if (!existsSync(DASHBOARD_PID_FILE)) {
+    pass("Dashboard", "Already stopped");
+    return;
+  }
+
+  const pid = parseInt(readFileSync(DASHBOARD_PID_FILE, "utf-8").trim(), 10);
+  if (isNaN(pid) || !isProcessRunning(pid)) {
+    try { unlinkSync(DASHBOARD_PID_FILE); } catch {}
+    pass("Dashboard", "Already stopped (stale PID file cleaned)");
+    return;
+  }
+
+  process.kill(pid, "SIGTERM");
+  await Bun.sleep(1_000);
+
+  if (isProcessRunning(pid)) {
+    process.kill(pid, "SIGKILL");
+    await Bun.sleep(500);
+  }
+
+  try { unlinkSync(DASHBOARD_PID_FILE); } catch {}
+
+  if (!isProcessRunning(pid)) {
+    pass("Dashboard", `Stopped (PID ${pid})`);
+  } else {
+    fail("Dashboard", `PID ${pid} could not be killed`);
   }
 }
 

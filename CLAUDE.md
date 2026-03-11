@@ -15,6 +15,7 @@ bun run backfill                     # backfill all history, then daemon
 bun run open                         # facility startup with preflight checks
 bun run close                        # graceful facility shutdown
 bun run status                       # cross-project backlog scanner
+bun run dashboard                    # verification dashboard (localhost:7777)
 ```
 
 No linter, no tsconfig. Single dependency: `@supabase/supabase-js`. Tests: `bun test`.
@@ -28,7 +29,7 @@ Dual-loop daemon (`bin/daemon.ts`):
 ### Module Layout
 
 ```
-bin/           Entry points (daemon, lo-open, lo-close, lo-status)
+bin/           Entry points (daemon, lo-open, lo-close, lo-status, dashboard)
 src/           Library code
   parsers.ts           Log/stats file readers
   sync.ts              All Supabase writes (largest file)
@@ -40,6 +41,10 @@ src/           Library code
   project/
     scanner.ts         JSONL token aggregation from ~/.claude/projects/
     slug-resolver.ts   Maps directory paths → id via .lo/PROJECT.md frontmatter
+  verify/
+    local-reader.ts    Reads all local telemetry sources for dashboard
+    remote-reader.ts   Queries Supabase tables for dashboard comparison
+    comparator.ts      Diffs local vs remote, produces discrepancy lists
 ```
 
 ### Key Data Flow

@@ -1,6 +1,7 @@
 node_modules/
 .env
 .exporter.pid
+.dashboard.pid
 .project-mapping.json
 .slug-mapping.json
 .visibility-cache.json

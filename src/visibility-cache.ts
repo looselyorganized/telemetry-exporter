@@ -69,7 +69,7 @@ function ensureGhRepoMap(): void {
 /**
  * Resolve a project name to its visibility.
  * Uses the cached GitHub repo list for fast lookups.
- * Defaults to "private" (safer) when a project is not found on GitHub.
+ * Defaults to "private" when a project is not found on GitHub.
  */
 export function getVisibility(projectName: string): Visibility {
   if (cache[projectName]) return cache[projectName];

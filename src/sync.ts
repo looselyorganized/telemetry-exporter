@@ -52,7 +52,7 @@ export async function upsertProject(
   projId: string,
   contentSlug: string,
   localName: string,
-  visibility: "public" | "classified",
+  visibility: "public" | "private",
   timestamp?: Date
 ): Promise<void> {
   const now = timestamp ?? new Date();

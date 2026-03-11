@@ -42,10 +42,31 @@ async function getSnapshot(): Promise<{ local: LocalData; remote: RemoteData }> 
   if (cachedSnapshot && Date.now() - cachedSnapshot.ts < CACHE_TTL) {
     return cachedSnapshot;
   }
-  const [local, remote] = await Promise.all([
-    Promise.resolve(readAllLocal()),
-    readAllRemote(supabase),
-  ]);
+  // Two-pass approach:
+  // 1. Quick remote fetch for project names (needed to enrich local projId map)
+  // 2. Full local read (gives us logStartDate + enriched event counts)
+  // 3. Full remote read using logStartDate as event cutoff
+
+  // Step 1: fetch remote projects for supplemental projId mappings
+  const { data: remoteProjects } = await supabase
+    .from("projects")
+    .select("id, content_slug, local_names");
+
+  const supplementalProjIds = new Map<string, string>();
+  for (const proj of remoteProjects ?? []) {
+    if (proj.content_slug) supplementalProjIds.set(proj.content_slug as string, proj.id as string);
+    for (const name of (proj.local_names as string[]) ?? []) {
+      supplementalProjIds.set(name, proj.id as string);
+    }
+  }
+
+  // Step 2: read local data with enriched projId map
+  const local = readAllLocal(supplementalProjIds);
+
+  // Step 3: fetch remote using local log start date as event cutoff
+  // so we only compare the window where both sides have data
+  const remote = await readAllRemote(supabase, local.logStartDate ?? undefined);
+
   cachedSnapshot = { local, remote, ts: Date.now() };
   return cachedSnapshot;
 }
@@ -186,6 +207,10 @@ function dashboardHtml(): string {
   .row-val.match { color: #50ff96; }
   .row-val.warning { color: #ffc850; }
   .row-val.error { color: #ff5050; }
+  .row-pct { color: #555; font-size: 11px; min-width: 50px; text-align: right; }
+  .row-pct.match { color: #50ff96; }
+  .row-pct.warning { color: #ffc850; }
+  .row-pct.error { color: #ff5050; }
   .summary {
     font-size: 12px;
     padding: 10px 0;
@@ -332,6 +357,20 @@ function buildSide(title, data, remoteData, discMap, isRemote) {
       }
     }
     row.appendChild(el('span', cls, formatNum(val) + suffix));
+
+    if (isRemote) {
+      var pctCls = 'row-pct';
+      var pctText = '';
+      if (disc) {
+        pctCls += ' ' + disc.severity;
+        pctText = (disc.pctDiff * 100).toFixed(1) + '%';
+      } else {
+        pctCls += ' match';
+        pctText = '0%';
+      }
+      row.appendChild(el('span', pctCls, pctText));
+    }
+
     side.appendChild(row);
   }
   return side;

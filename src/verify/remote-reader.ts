@@ -58,11 +58,10 @@ export interface RemoteData {
 
 /**
  * Fetch events with pagination (Supabase default limit is 1000).
- * Only fetches the last 30 days to keep comparison bounded.
+ * Uses the provided cutoff (log start date) so we only compare the
+ * time range where both local and remote have data.
  */
-async function readRemoteEvents(supabase: SupabaseClient): Promise<{ data: RemoteEvents; ok: boolean }> {
-  const cutoff = new Date();
-  cutoff.setDate(cutoff.getDate() - 30);
+async function readRemoteEvents(supabase: SupabaseClient, cutoff: Date): Promise<{ data: RemoteEvents; ok: boolean }> {
 
   const byProjectDate: Record<string, Record<string, number>> = {};
   let totalCount = 0;
@@ -188,12 +187,22 @@ async function readLastSync(supabase: SupabaseClient): Promise<{ data: string | 
 
 // ─── Main export ────────────────────────────────────────────────────────────
 
-export async function readAllRemote(supabase: SupabaseClient): Promise<RemoteData> {
+/**
+ * @param eventCutoff If provided, only fetch events after this date.
+ *   Used to align the remote window with the local events.log start date
+ *   so we only compare the range where both sides have data.
+ */
+export async function readAllRemote(
+  supabase: SupabaseClient,
+  eventCutoff?: Date
+): Promise<RemoteData> {
   const start = Date.now();
+  const defaultCutoff = new Date();
+  defaultCutoff.setDate(defaultCutoff.getDate() - 14);
 
   const [events, metrics, tokens, models, projects, hourDistribution, lastSync] =
     await Promise.all([
-      readRemoteEvents(supabase),
+      readRemoteEvents(supabase, eventCutoff ?? defaultCutoff),
       readRemoteMetrics(supabase),
       readRemoteTokens(supabase),
       readRemoteModels(supabase),
