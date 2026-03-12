@@ -48,17 +48,18 @@ export async function withRetry<T>(
   label: string,
   maxRetries = 2
 ): Promise<{ data: T; error: any }> {
+  let lastResult: { data: T; error: any; status?: number } | undefined;
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    const result = await op();
-    const status = (result as any).status ?? 0;
-    if (!result.error || status < 500) return result;
+    lastResult = await op();
+    const status = (lastResult as any).status ?? 0;
+    if (!lastResult.error || status < 500) return lastResult;
     if (attempt < maxRetries) {
       const delay = 1000 * 2 ** attempt;
       console.warn(`  ${label}: transient error (HTTP ${status}), retry ${attempt + 1}/${maxRetries} in ${delay}ms`);
       await Bun.sleep(delay);
     }
   }
-  return op();
+  return lastResult!;
 }
 
 // ─── Projects ──────────────────────────────────────────────────────────────
@@ -97,26 +98,32 @@ export async function upsertProject(
   let localNames: string[] | null = (data?.local_names as string[] | undefined) ?? null;
 
   if (error) {
-    // Upsert failed (e.g. first_seen immutable) — fall back to updating last_active
+    // Upsert failed (e.g. first_seen immutable) — fall back to updating mutable fields
     const { data: fallback, error: updateError } = await supabase
       .from("projects")
-      .update({ last_active: now.toISOString(), visibility })
+      .update({
+        last_active: now.toISOString(),
+        visibility,
+        content_slug: contentSlug,
+        state: visibility === "public" ? "public" : "private",
+      })
       .eq("id", projId)
       .select("local_names")
       .single();
     if (updateError) {
-      console.error(`  Failed to register project ${projId}:`, error.message);
+      console.error(`  Failed to register project ${projId}:`, updateError.message);
       return false;
     }
     localNames = (fallback?.local_names as string[] | undefined) ?? null;
   }
 
   // Merge localName into local_names if it's not already present
-  if (localName && localName !== contentSlug && localNames) {
-    if (!localNames.includes(localName)) {
+  if (localName && localName !== contentSlug) {
+    const names = localNames ?? [];
+    if (!names.includes(localName)) {
       await supabase
         .from("projects")
-        .update({ local_names: [...localNames, localName] })
+        .update({ local_names: [...names, localName] })
         .eq("id", projId);
     }
   }
@@ -193,6 +200,12 @@ export async function insertEvents(entries: LogEntry[]): Promise<InsertEventsRes
     );
 
     if (error) {
+      const errorStatus = (error as any)?.status ?? (error as any)?.statusCode ?? 0;
+      if (errorStatus >= 500) {
+        console.error(`  events: batch ${i}-${i + batch.length} server error (HTTP ${errorStatus}), skipping per-row — will retry next cycle`);
+        errors += batch.length;
+        continue;
+      }
       console.error(`  events: batch ${i}-${i + batch.length} failed (${error.message}), falling back to per-row`);
       let recovered = 0;
       for (const row of batch) {

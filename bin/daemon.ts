@@ -118,6 +118,9 @@ const tailer = new LogTailer();
 // Track projects we've already ensured exist in the DB (by projId)
 const knownProjects = new Set<string>();
 
+// Projects whose upsert failed — buffer their events until registration succeeds
+const failedRegistrations = new Set<string>();
+
 // Directory name → slug mapping, refreshed every 60 cycles
 let slugMap: Map<string, string> = new Map();
 
@@ -212,8 +215,10 @@ async function ensureProjects(entries: LogEntry[]): Promise<void> {
     const ok = await upsertProject(projId, slug, localName, visibility, firstEntry?.parsedTimestamp ?? undefined);
     if (ok) {
       knownProjects.add(projId);
+      failedRegistrations.delete(projId);
       console.log(`  Project registered: ${slug} [${projId}]${slug !== localName ? ` (dir: ${localName})` : ""} (${visibility})`);
     } else {
+      failedRegistrations.add(projId);
       console.error(`  Project registration failed: ${slug} [${projId}] — will retry next cycle`);
     }
   }
@@ -264,7 +269,7 @@ async function insertAndTrackActivity(entries: LogEntry[]): Promise<{
   inserted: number;
   errors: number;
 }> {
-  const loEntries = filterAndMapLocal(entries);
+  const loEntries = filterAndMapLocal(entries).filter((e) => !failedRegistrations.has(e.project));
   const { inserted, errors, insertedByProject } = await insertEvents(loEntries);
 
   const lastActiveByProject = computeLastActive(loEntries);

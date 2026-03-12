@@ -252,11 +252,14 @@ describe("smoke: all .lo/ projects resolve", () => {
     });
   } catch { /* PROJECT_ROOT missing in CI — tests will be skipped */ }
 
-  test("PROJECT_ROOT has .lo/ projects to test", () => {
+  // Skip all smoke tests when PROJECT_ROOT has no .lo/ projects (e.g. in CI)
+  const noProjects = loProjects.length === 0;
+
+  test.skipIf(noProjects)("PROJECT_ROOT has .lo/ projects to test", () => {
     expect(loProjects.length).toBeGreaterThan(0);
   });
 
-  test("every .lo/ project resolves a non-null projId", () => {
+  test.skipIf(noProjects)("every .lo/ project resolves a non-null projId", () => {
     clearSlugCache();
     clearProjIdCache();
 
@@ -278,7 +281,7 @@ describe("smoke: all .lo/ projects resolve", () => {
     }
   });
 
-  test("buildSlugMap includes all .lo/ projects", () => {
+  test.skipIf(noProjects)("buildSlugMap includes all .lo/ projects", () => {
     clearSlugCache();
     clearProjIdCache();
     const slugMap = buildSlugMap();
