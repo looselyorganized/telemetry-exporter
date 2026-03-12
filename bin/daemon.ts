@@ -124,6 +124,9 @@ const failedRegistrations = new Set<string>();
 // Buffered events for failed-registration projects — drained after successful upsert
 const bufferedEvents = new Map<string, LogEntry[]>();
 
+// Maximum events to buffer per project while registration is pending
+const MAX_BUFFERED_EVENTS_PER_PROJECT = 1000;
+
 // Directory name → slug mapping, refreshed every 60 cycles
 let slugMap: Map<string, string> = new Map();
 
@@ -224,13 +227,17 @@ async function ensureProjects(entries: LogEntry[]): Promise<void> {
       // Drain any buffered events that were skipped while registration was failing
       const buffered = bufferedEvents.get(projId);
       if (buffered && buffered.length > 0) {
-        bufferedEvents.delete(projId);
         console.log(`  Draining ${buffered.length} buffered events for ${slug} [${projId}]`);
-        const { insertedByProject } = await insertEvents(buffered);
-        const lastActiveByProject = computeLastActive(buffered);
-        for (const [pid, count] of Object.entries(insertedByProject)) {
-          const lastActive = lastActiveByProject[pid] ?? new Date();
-          await updateProjectActivity(pid, count, lastActive);
+        try {
+          const { insertedByProject } = await insertEvents(buffered);
+          const lastActiveByProject = computeLastActive(buffered);
+          for (const [pid, count] of Object.entries(insertedByProject)) {
+            const lastActive = lastActiveByProject[pid] ?? new Date();
+            await updateProjectActivity(pid, count, lastActive);
+          }
+          bufferedEvents.delete(projId);
+        } catch (err) {
+          console.error(`  Failed to drain buffered events for ${slug} [${projId}], will retry next cycle:`, err);
         }
       }
     } else {
@@ -290,8 +297,13 @@ async function insertAndTrackActivity(entries: LogEntry[]): Promise<{
   for (const entry of loEntries) {
     if (failedRegistrations.has(entry.project)) {
       const buf = bufferedEvents.get(entry.project) ?? [];
-      buf.push(entry);
-      bufferedEvents.set(entry.project, buf);
+      if (buf.length < MAX_BUFFERED_EVENTS_PER_PROJECT) {
+        buf.push(entry);
+        bufferedEvents.set(entry.project, buf);
+        if (buf.length === MAX_BUFFERED_EVENTS_PER_PROJECT) {
+          console.warn(`  Buffer full for ${entry.project} (limit: ${MAX_BUFFERED_EVENTS_PER_PROJECT}): further events will be dropped until registration succeeds`);
+        }
+      }
     } else {
       toInsert.push(entry);
     }
