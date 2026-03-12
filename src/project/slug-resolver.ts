@@ -34,38 +34,51 @@ const slugCache = new Map<string, string | null>();
 const projIdCache = new Map<string, string | null>();
 let legacyMappingCache: Map<string, string> | null = null;
 
-/** Minimal YAML frontmatter parser — extracts key: value pairs between --- fences.
- *  Handles quoted values and inline YAML comments. */
-export function parseFrontmatter(content: string): Record<string, string> {
-  const match = content.match(/^---\s*\n([\s\S]*?)\n---/);
-  if (!match) return {};
-
+/** Parse lines of key: value YAML pairs. Handles quoted values and inline comments. */
+function parseYamlLines(lines: string): Record<string, string> {
   const result: Record<string, string> = {};
-  for (const line of match[1].split("\n")) {
+  for (const line of lines.split("\n")) {
     const kv = line.match(/^(\w[\w-]*)\s*:\s*(.+)/);
-    if (kv) {
-      let v = kv[2].trim();
-      // Strip inline YAML comments from quoted values (e.g. "explore"  # comment)
-      v = v.replace(/^["']([^"']*)["']\s*#.*$/, "$1");
-      // Strip inline YAML comments from unquoted values (e.g. explore # comment)
-      v = v.replace(/\s+#.*$/, "");
-      v = v.replace(/^["']|["']$/g, "");
-      result[kv[1]] = v;
-    }
+    if (!kv) continue;
+    let v = kv[2].trim();
+    // Strip inline YAML comments from quoted values (e.g. "explore"  # comment)
+    v = v.replace(/^["']([^"']*)["']\s*#.*$/, "$1");
+    // Strip inline YAML comments from unquoted values (e.g. explore # comment)
+    v = v.replace(/\s+#.*$/, "");
+    v = v.replace(/^["']|["']$/g, "");
+    result[kv[1]] = v;
   }
   return result;
 }
 
-/** Read and parse the PROJECT.md frontmatter from a .lo/ directory, or null if not found. */
+/** Extract key-value pairs from YAML frontmatter between --- fences. */
+export function parseFrontmatter(content: string): Record<string, string> {
+  const match = content.match(/^---\s*\n([\s\S]*?)\n---/);
+  if (!match) return {};
+  return parseYamlLines(match[1]);
+}
+
+/** Parse a pure YAML file (no frontmatter fences) into key-value pairs. */
+export function parseYaml(content: string): Record<string, string> {
+  return parseYamlLines(content);
+}
+
+/** Read and parse project metadata from a .lo/ directory, or null if not found.
+ *  Supports: PROJECT.md (frontmatter), project.md (frontmatter), project.yml (pure YAML). */
 function readProjectFrontmatter(projectDir: string): Record<string, string> | null {
   const loDir = join(projectDir, ".lo");
   if (!existsSync(loDir)) return null;
 
   try {
-    const projectMdPath = existsSync(join(loDir, "PROJECT.md"))
-      ? join(loDir, "PROJECT.md")
-      : join(loDir, "project.md");
-    return parseFrontmatter(readFileSync(projectMdPath, "utf-8"));
+    // Prefer .md with frontmatter, fall back to .yml (pure YAML)
+    for (const name of ["PROJECT.md", "project.md", "project.yml"]) {
+      const path = join(loDir, name);
+      if (existsSync(path)) {
+        const content = readFileSync(path, "utf-8");
+        return name.endsWith(".yml") ? parseYaml(content) : parseFrontmatter(content);
+      }
+    }
+    return {};
   } catch {
     return {};
   }

@@ -123,6 +123,15 @@ const tailer = new LogTailer();
 // Track projects we've already ensured exist in the DB (by projId)
 const knownProjects = new Set<string>();
 
+// Projects whose upsert failed — buffer their events until registration succeeds
+const failedRegistrations = new Set<string>();
+
+// Buffered events for failed-registration projects — drained after successful upsert
+const bufferedEvents = new Map<string, LogEntry[]>();
+
+// Maximum events to buffer per project while registration is pending
+const MAX_BUFFERED_EVENTS_PER_PROJECT = 1000;
+
 // Directory name → slug mapping, refreshed every 60 cycles
 let slugMap: Map<string, string> = new Map();
 
@@ -214,10 +223,32 @@ async function ensureProjects(entries: LogEntry[]): Promise<void> {
     const slug = projIdToSlug.get(projId) ?? "";
     const visibility = getVisibility(localName);
     const firstEntry = entries.find((e) => toProjId(e.project) === projId);
-    const registered = await upsertProject(projId, slug, localName, visibility, firstEntry?.parsedTimestamp ?? undefined);
-    if (!registered) continue;
-    knownProjects.add(projId);
-    console.log(`  Project registered: ${slug} [${projId}]${slug !== localName ? ` (dir: ${localName})` : ""} (${visibility})`);
+    const ok = await upsertProject(projId, slug, localName, visibility, firstEntry?.parsedTimestamp ?? undefined);
+    if (ok) {
+      knownProjects.add(projId);
+      failedRegistrations.delete(projId);
+      console.log(`  Project registered: ${slug} [${projId}]${slug !== localName ? ` (dir: ${localName})` : ""} (${visibility})`);
+
+      // Drain any buffered events that were skipped while registration was failing
+      const buffered = bufferedEvents.get(projId);
+      if (buffered && buffered.length > 0) {
+        console.log(`  Draining ${buffered.length} buffered events for ${slug} [${projId}]`);
+        try {
+          const { insertedByProject } = await insertEvents(buffered);
+          const lastActiveByProject = computeLastActive(buffered);
+          for (const [pid, count] of Object.entries(insertedByProject)) {
+            const lastActive = lastActiveByProject[pid] ?? new Date();
+            await updateProjectActivity(pid, count, lastActive);
+          }
+          bufferedEvents.delete(projId);
+        } catch (err) {
+          console.error(`  Failed to drain buffered events for ${slug} [${projId}], will retry next cycle:`, err);
+        }
+      }
+    } else {
+      failedRegistrations.add(projId);
+      console.error(`  Project registration failed: ${slug} [${projId}] — buffering events, will retry next cycle`);
+    }
   }
 }
 
@@ -267,9 +298,24 @@ async function insertAndTrackActivity(entries: LogEntry[]): Promise<{
   errors: number;
 }> {
   const loEntries = filterAndMapLocal(entries);
-  const { inserted, errors, insertedByProject } = await insertEvents(loEntries);
+  const toInsert: LogEntry[] = [];
+  for (const entry of loEntries) {
+    if (failedRegistrations.has(entry.project)) {
+      const buf = bufferedEvents.get(entry.project) ?? [];
+      if (buf.length < MAX_BUFFERED_EVENTS_PER_PROJECT) {
+        buf.push(entry);
+        bufferedEvents.set(entry.project, buf);
+        if (buf.length === MAX_BUFFERED_EVENTS_PER_PROJECT) {
+          console.warn(`  Buffer full for ${entry.project} (limit: ${MAX_BUFFERED_EVENTS_PER_PROJECT}): further events will be dropped until registration succeeds`);
+        }
+      }
+    } else {
+      toInsert.push(entry);
+    }
+  }
+  const { inserted, errors, insertedByProject } = await insertEvents(toInsert);
 
-  const lastActiveByProject = computeLastActive(loEntries);
+  const lastActiveByProject = computeLastActive(toInsert);
   for (const [projId, count] of Object.entries(insertedByProject)) {
     const lastActive = lastActiveByProject[projId] ?? new Date();
     await updateProjectActivity(projId, count, lastActive);
@@ -728,11 +774,14 @@ async function main(): Promise<void> {
           const statsCache = readStatsCache();
           await refreshMaps();
           await refreshProjectCachesFromDisk();
-          await Promise.all([
+          const settled = await Promise.allSettled([
             maybeSyncDailyMetrics(statsCache),
             maybeSyncProjectDailyMetrics(),
             maybePruneEvents(),
           ]);
+          for (const r of settled) {
+            if (r.status === "rejected") console.error("  Periodic task failed:", r.reason);
+          }
           pruneSeenEntries();
         }
         cycleCount++;
