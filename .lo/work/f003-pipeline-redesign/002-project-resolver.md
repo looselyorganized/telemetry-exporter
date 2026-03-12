@@ -1,5 +1,5 @@
 ---
-status: pending
+status: done
 feature_id: "f003"
 feature: "Pipeline Redesign"
 phase: 2
