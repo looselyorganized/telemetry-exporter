@@ -33,9 +33,9 @@ mock.module("@supabase/supabase-js", () => ({
 }));
 
 // Import after mock so initSupabase uses our mock createClient
-const { withRetry, insertEvents, upsertProject, initSupabase } = await import(
-  "../sync"
-);
+const { withRetry, initSupabase } = await import("../db/client");
+const { insertEvents } = await import("../db/events");
+const { upsertProject } = await import("../db/projects");
 
 initSupabase("http://fake", "fake-key");
 

@@ -30,26 +30,27 @@ import {
 } from "./daemon-helpers";
 import { getFacilityState } from "../src/process/scanner";
 import { scanProjectTokens, computeTokensByProject } from "../src/project/scanner";
+import { initSupabase, getSupabase } from "../src/db/client";
 import {
-  initSupabase,
-  getSupabase,
-  upsertProject,
-  updateProjectActivity,
-  insertEvents,
-  syncDailyMetrics,
-  syncProjectDailyMetrics,
-  deleteProjectDailyMetrics,
-  updateFacilityStatus,
-  batchUpsertProjectTelemetry,
-  pruneOldEvents,
-  pushAgentState,
-  updateFacilityMetrics,
-  setFacilitySwitch,
   type FacilityUpdate,
   type FacilityMetricsUpdate,
   type ProjectTelemetryUpdate,
   type ProjectEventAggregates,
-} from "../src/sync";
+} from "../src/db/types";
+import { upsertProject, updateProjectActivity } from "../src/db/projects";
+import { insertEvents, pruneOldEvents } from "../src/db/events";
+import {
+  updateFacilityStatus,
+  updateFacilityMetrics,
+  setFacilitySwitch,
+} from "../src/db/facility";
+import {
+  syncDailyMetrics,
+  syncProjectDailyMetrics,
+  deleteProjectDailyMetrics,
+} from "../src/db/metrics";
+import { batchUpsertProjectTelemetry } from "../src/db/telemetry";
+import { pushAgentState } from "../src/db/agent-state";
 import { ProcessWatcher } from "../src/process/watcher";
 import {
   loadVisibilityCache,
@@ -522,7 +523,7 @@ async function maybeSyncProjectDailyMetrics(): Promise<void> {
     lastProjectSync = today;
   } catch (err) {
     console.error("Error syncing project daily metrics:", err);
-    reportError("sync_write", `maybeSyncProjectDailyMetrics: ${err instanceof Error ? err.message : String(err)}`);
+    reportError("event_write", `maybeSyncProjectDailyMetrics: ${err instanceof Error ? err.message : String(err)}`);
   }
 }
 
@@ -583,7 +584,7 @@ async function maybePruneEvents(): Promise<void> {
     lastPruneDate = today;
   } catch (err) {
     console.error("Error pruning events:", err);
-    reportError("sync_write", `maybePruneEvents: ${err instanceof Error ? err.message : String(err)}`);
+    reportError("event_write", `maybePruneEvents: ${err instanceof Error ? err.message : String(err)}`);
   }
 }
 
@@ -757,7 +758,7 @@ async function main(): Promise<void> {
         }
       } catch (err) {
         console.error("Watcher error:", err);
-        reportError("facility_update", `watcherLoop: ${err instanceof Error ? err.message : String(err)}`);
+        reportError("facility_state", `watcherLoop: ${err instanceof Error ? err.message : String(err)}`);
       }
       await Bun.sleep(250);
     }
@@ -788,7 +789,7 @@ async function main(): Promise<void> {
         cycleCount++;
       } catch (err) {
         console.error("Aggregate sync error:", err);
-        reportError("sync_write", `aggregateLoop: ${err instanceof Error ? err.message : String(err)}`);
+        reportError("event_write", `aggregateLoop: ${err instanceof Error ? err.message : String(err)}`);
       } finally {
         // Always flush error state and prune resolved errors each cycle
         try {

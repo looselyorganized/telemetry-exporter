@@ -11,11 +11,7 @@ export type ErrorCategory =
   | "facility_state"
   | "metrics_sync"
   | "telemetry_sync"
-  | "supabase_transient"
-  // Deprecated — will be removed after domain module migration
-  | "sync_write"
-  | "project_resolution"
-  | "facility_update";
+  | "supabase_transient";
 
 export interface ActiveError {
   id: string;                          // "category:normalized_message"

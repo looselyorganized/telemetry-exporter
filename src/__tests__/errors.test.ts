@@ -25,21 +25,21 @@ describe("ErrorReporter", () => {
 
   describe("normalization", () => {
     it("normalizes project IDs", () => {
-      reportError("sync_write", "skipping proj_abc123def (FK error)");
+      reportError("event_write", "skipping proj_abc123def (FK error)");
       const errors = getActiveErrors();
-      expect(errors[0].id).toBe("sync_write:skipping <proj> (FK error)");
+      expect(errors[0].id).toBe("event_write:skipping <proj> (FK error)");
     });
 
     it("normalizes batch ranges", () => {
-      reportError("sync_write", "batch 0-500 failed");
+      reportError("event_write", "batch 0-500 failed");
       const errors = getActiveErrors();
-      expect(errors[0].id).toBe("sync_write:batch <range> failed");
+      expect(errors[0].id).toBe("event_write:batch <range> failed");
     });
 
     it("normalizes token counts like 12.3M", () => {
-      reportError("sync_write", "wrote 12.3M but DB has 11.9M");
+      reportError("event_write", "wrote 12.3M but DB has 11.9M");
       const errors = getActiveErrors();
-      expect(errors[0].id).toBe("sync_write:wrote <N> but DB has <N>");
+      expect(errors[0].id).toBe("event_write:wrote <N> but DB has <N>");
     });
 
     it("keeps HTTP status codes as-is", () => {
@@ -51,17 +51,17 @@ describe("ErrorReporter", () => {
 
   describe("deduplication", () => {
     it("increments count for duplicate errors", () => {
-      reportError("sync_write", "connection refused");
-      reportError("sync_write", "connection refused");
-      reportError("sync_write", "connection refused");
+      reportError("event_write", "connection refused");
+      reportError("event_write", "connection refused");
+      reportError("event_write", "connection refused");
       const errors = getActiveErrors();
       expect(errors).toHaveLength(1);
       expect(errors[0].count).toBe(3);
     });
 
     it("deduplicates across variable project IDs", () => {
-      reportError("sync_write", "skipping proj_aaa (FK error)");
-      reportError("sync_write", "skipping proj_bbb (FK error)");
+      reportError("event_write", "skipping proj_aaa (FK error)");
+      reportError("event_write", "skipping proj_bbb (FK error)");
       const errors = getActiveErrors();
       expect(errors).toHaveLength(1);
       expect(errors[0].count).toBe(2);
@@ -69,24 +69,24 @@ describe("ErrorReporter", () => {
     });
 
     it("tracks separate errors by category", () => {
-      reportError("sync_write", "timeout");
-      reportError("facility_update", "timeout");
+      reportError("event_write", "timeout");
+      reportError("facility_state", "timeout");
       const errors = getActiveErrors();
       expect(errors).toHaveLength(2);
     });
 
     it("preserves sample_context from first occurrence", () => {
-      reportError("sync_write", "batch 0-500 failed", { httpStatus: 502 });
-      reportError("sync_write", "batch 500-1000 failed", { httpStatus: 503 });
+      reportError("event_write", "batch 0-500 failed", { httpStatus: 502 });
+      reportError("event_write", "batch 500-1000 failed", { httpStatus: 503 });
       const errors = getActiveErrors();
       expect(errors).toHaveLength(1);
       expect(errors[0].sampleContext).toEqual({ httpStatus: 502 });
     });
 
     it("updates lastSeen on repeat", () => {
-      reportError("sync_write", "fail");
+      reportError("event_write", "fail");
       const first = getActiveErrors()[0].lastSeen;
-      reportError("sync_write", "fail");
+      reportError("event_write", "fail");
       const second = getActiveErrors()[0].lastSeen;
       expect(second.getTime()).toBeGreaterThanOrEqual(first.getTime());
     });
@@ -94,7 +94,7 @@ describe("ErrorReporter", () => {
 
   describe("pruneResolved", () => {
     it("prunes errors older than 5 minutes from memory", async () => {
-      reportError("sync_write", "old error");
+      reportError("event_write", "old error");
       const errors = getActiveErrors();
       errors[0].lastSeen = new Date(Date.now() - 6 * 60 * 1000);
 
@@ -104,7 +104,7 @@ describe("ErrorReporter", () => {
     });
 
     it("keeps errors seen within 5 minutes", async () => {
-      reportError("sync_write", "recent error");
+      reportError("event_write", "recent error");
       const pruned = await pruneResolved();
       expect(pruned).toBe(0);
       expect(getActiveErrors()).toHaveLength(1);
