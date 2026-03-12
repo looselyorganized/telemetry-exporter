@@ -7,6 +7,7 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import type { LogEntry, ModelStats, StatsCache } from "./parsers";
 import type { ProcessDiff } from "./process/watcher";
 import type { ProjectTokenMap } from "./project/scanner";
+import { reportError } from "./errors";
 
 // ─── Shared types ─────────────────────────────────────────────────────────
 
@@ -112,6 +113,7 @@ export async function upsertProject(
       .single();
     if (updateError) {
       console.error(`  Failed to register project ${projId}:`, updateError.message);
+      reportError("project_resolution", `upsertProject failed: ${updateError.message}`, { project_id: projId, slug: contentSlug });
       return false;
     }
     localNames = (fallback?.local_names as string[] | undefined) ?? null;
@@ -204,12 +206,14 @@ export async function insertEvents(entries: LogEntry[]): Promise<InsertEventsRes
       if (errorStatus >= 500) {
         // Server error — don't amplify with per-row retries, let next cycle handle it
         console.error(`  events: batch ${i}-${i + batch.length} failed (HTTP ${errorStatus}: ${error.message}), skipping — will retry next cycle`);
+        reportError("supabase_transient", `events: batch ${i}-${i + batch.length} failed (HTTP ${errorStatus}: ${error.message})`, { batchStart: i, batchEnd: i + batch.length });
         errors += batch.length;
         continue;
       }
 
       // Non-5xx (FK violation, constraint error, etc.) — try per-row recovery
       console.error(`  events: batch ${i}-${i + batch.length} failed (${error.message}), falling back to per-row`);
+      reportError("sync_write", `events: batch ${i}-${i + batch.length} failed (${error.message})`, { batchStart: i, batchEnd: i + batch.length });
       let recovered = 0;
       for (const row of batch) {
         const { error: rowError } = await supabase
@@ -449,6 +453,7 @@ export async function syncProjectDailyMetrics(
     const { error } = await supabase.from("daily_metrics").insert(batch);
     if (error) {
       console.error(`  Error bulk inserting project metrics:`, error.message);
+      reportError("sync_write", `syncProjectDailyMetrics: bulk insert failed (${error.message})`);
     }
   }
 
@@ -504,6 +509,7 @@ export async function updateFacilityStatus(update: FacilityUpdate): Promise<void
 
   if (error) {
     console.error("Error updating facility status:", error.message);
+    reportError("facility_update", `updateFacilityStatus: ${error.message}`);
   }
 }
 
@@ -521,6 +527,7 @@ export async function setFacilitySwitch(status: "active" | "dormant"): Promise<v
 
   if (error) {
     console.error("Error setting facility switch:", error.message);
+    reportError("facility_update", `setFacilitySwitch: ${error.message}`);
   }
 }
 
@@ -545,6 +552,7 @@ export async function updateFacilityMetrics(update: FacilityMetricsUpdate): Prom
 
   if (error) {
     console.error("Error updating facility metrics:", error.message);
+    reportError("facility_update", `updateFacilityMetrics: ${error.message}`);
   }
 }
 
@@ -621,6 +629,7 @@ export async function batchUpsertProjectTelemetry(
   if (error) {
     // Batch failed (likely FK violation) -- fall back to per-row upserts
     console.error(`  project_telemetry: batch upsert failed (${error.message}), falling back to per-row`);
+    reportError("sync_write", `project_telemetry: batch upsert failed (${error.message})`);
     let succeeded = 0;
     for (const update of updates) {
       const { error: rowError } = await supabase
@@ -628,6 +637,7 @@ export async function batchUpsertProjectTelemetry(
         .upsert(toRow(update), { onConflict: "id" });
       if (rowError) {
         console.error(`  project_telemetry: skipping ${update.projId} (${rowError.message})`);
+        reportError("sync_write", `project_telemetry: row failed (${rowError.message})`, { project_id: update.projId });
       } else {
         succeeded++;
       }
@@ -682,6 +692,7 @@ export async function deleteProjectDailyMetrics(): Promise<number> {
 
   if (error) {
     console.error("Error deleting per-project daily_metrics:", error.message);
+    reportError("sync_write", `deleteProjectDailyMetrics: ${error.message}`);
     return 0;
   }
 
@@ -705,6 +716,7 @@ export async function pruneOldEvents(retentionDays = 14): Promise<number> {
 
   if (error) {
     console.error("Error pruning old events:", error.message);
+    reportError("sync_write", `pruneOldEvents: ${error.message}`);
     return 0;
   }
 
@@ -745,6 +757,7 @@ export async function pushAgentState(diff: ProcessDiff): Promise<void> {
   for (const result of results) {
     if (result.error) {
       console.error("  pushAgentState error:", result.error.message);
+      reportError("facility_update", `pushAgentState: ${result.error.message}`);
     }
   }
 }
