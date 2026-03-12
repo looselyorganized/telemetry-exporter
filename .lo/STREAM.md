@@ -6,7 +6,7 @@ type: stream
 date: 2026-03-12
 title: "Dashboard error view"
 <description>
-In-memory error aggregator deduplicates daemon errors by category and normalized message, flushes to Supabase every cycle, and surfaces them in a new Errors tab with colored category badges and expandable context. 15 error sites instrumented across sync and daemon layers — errors auto-prune after 5 minutes of silence.
+In-memory error aggregator deduplicates sync and daemon errors by category and normalized message, flushes to Supabase every cycle, and surfaces them in a new Errors tab with colored category badges and expandable context. 15 error sites instrumented across sync and daemon layers — errors auto-prune after 5 minutes of silence.
 </description>
 </entry>
 
