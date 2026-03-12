@@ -4,7 +4,6 @@
  */
 
 import { readFileSync, existsSync } from "fs";
-import { join } from "path";
 
 import {
   LogTailer,
@@ -19,13 +18,7 @@ import {
   computeTokensByProject,
   type ProjectTokenMap,
 } from "../project/scanner";
-import {
-  buildSlugMap,
-  clearSlugCache,
-  resolveProjId,
-  clearProjIdCache,
-  PROJECT_ROOT,
-} from "../project/slug-resolver";
+import type { ProjectResolver } from "../project/resolver";
 import { PID_FILE, isProcessRunning } from "../cli-output";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -146,8 +139,8 @@ function readLocalMetrics(): LocalMetrics {
   };
 }
 
-function readLocalTokens(): LocalTokens {
-  const tokenMap = scanProjectTokens();
+function readLocalTokens(resolver?: ProjectResolver): LocalTokens {
+  const tokenMap = scanProjectTokens(resolver);
   return { byProject: computeTokensByProject(tokenMap) };
 }
 
@@ -177,45 +170,23 @@ function readHourDistribution(): Record<string, number> {
 /**
  * Read all local telemetry data.
  *
- * @param supplementalProjIds Optional map of dirName → projId for projects
- *   no longer on disk (e.g. renamed/removed). Built from remote project
- *   data (local_names + content_slug → projId) so events.log entries for
- *   orphaned projects still resolve correctly.
+ * Uses ProjectResolver.entries() which already includes disk, Supabase
+ * local_names, org-root, and legacy mappings — no supplemental merging needed.
  */
-export function readAllLocal(
-  supplementalProjIds?: Map<string, string>
-): LocalData {
-  // Build projId map once, reused by events and projects
-  clearSlugCache();
-  clearProjIdCache();
-  const slugMap = buildSlugMap();
+export function readAllLocal(resolver: ProjectResolver): LocalData {
+  // Build projIdMap and projects list from resolver.entries()
   const projIdMap = new Map<string, string>();
-  for (const [dirName] of slugMap) {
-    const projId = resolveProjId(join(PROJECT_ROOT, dirName));
-    if (projId) projIdMap.set(dirName, projId);
-  }
-
-  // Merge supplemental mappings for orphaned/renamed projects
-  if (supplementalProjIds) {
-    for (const [dirName, projId] of supplementalProjIds) {
-      if (!projIdMap.has(dirName)) projIdMap.set(dirName, projId);
-    }
-  }
-
   const projects: LocalProject[] = [];
-  for (const [dirName, slug] of slugMap) {
-    projects.push({ dirName, slug, projId: projIdMap.get(dirName) ?? null });
-  }
+  const seenProjIds = new Set<string>();
 
-  // Include supplemental projects (e.g. org-root) that exist in Supabase
-  // but don't have a directory on disk
-  if (supplementalProjIds) {
-    const knownProjIds = new Set(projects.map((p) => p.projId).filter(Boolean));
-    for (const [dirName, projId] of supplementalProjIds) {
-      if (!knownProjIds.has(projId)) {
-        projects.push({ dirName, slug: dirName, projId });
-        knownProjIds.add(projId);
-      }
+  for (const [dirName, resolved] of resolver.entries()) {
+    projIdMap.set(dirName, resolved.projId);
+
+    // Only add one entry per projId to the projects list
+    // (a project may appear under multiple dirNames)
+    if (!seenProjIds.has(resolved.projId)) {
+      projects.push({ dirName, slug: resolved.slug, projId: resolved.projId });
+      seenProjIds.add(resolved.projId);
     }
   }
 
@@ -224,7 +195,7 @@ export function readAllLocal(
   return {
     events,
     metrics: readLocalMetrics(),
-    tokens: readLocalTokens(),
+    tokens: readLocalTokens(resolver),
     models: readLocalModels(),
     projects,
     hourDistribution: readHourDistribution(),
