@@ -8,6 +8,10 @@ updated: 2026-03-12
   In-memory error aggregator with Supabase persistence and dashboard UI for surfacing daemon errors.
   [active](.lo/work/f002-dashboard-error-view/)
 
+- [ ] f003 Pipeline redesign
+  Split sync.ts into db/ domain modules, standardize error handling via checkResult, unify project resolution via ProjectResolver.
+  [active](.lo/work/f003-pipeline-redesign/)
+
 ## Tasks
 
 - [ ] t001 Add lint script
