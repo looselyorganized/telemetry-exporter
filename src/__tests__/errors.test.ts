@@ -1,5 +1,22 @@
-import { describe, it, expect, beforeEach } from "bun:test";
-import { reportError, getActiveErrors, clearErrors, pruneResolved, type ErrorCategory } from "../errors";
+import { describe, it, expect, beforeEach, mock } from "bun:test";
+
+mock.module("@supabase/supabase-js", () => ({
+  createClient: () => ({
+    from: () => ({
+      delete: () => ({
+        in: () => Promise.resolve({ data: null, error: null }),
+        neq: () => Promise.resolve({ data: null, error: null }),
+      }),
+      upsert: () => Promise.resolve({ data: null, error: null }),
+    }),
+  }),
+}));
+
+import { reportError, getActiveErrors, clearErrors, type ErrorCategory } from "../errors";
+import { pruneResolved } from "../db/errors";
+import { initSupabase } from "../db/client";
+
+initSupabase("http://fake", "fake-key");
 
 describe("ErrorReporter", () => {
   beforeEach(() => {

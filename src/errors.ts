@@ -3,11 +3,19 @@
  * Deduplicates errors by category:normalized_message and flushes to Supabase.
  */
 
-import { getSupabase } from "./sync";
-
 // ─── Types ──────────────────────────────────────────────────────────────────
 
-export type ErrorCategory = "sync_write" | "project_resolution" | "supabase_transient" | "facility_update";
+export type ErrorCategory =
+  | "event_write"
+  | "project_registration"
+  | "facility_state"
+  | "metrics_sync"
+  | "telemetry_sync"
+  | "supabase_transient"
+  // Deprecated — will be removed after domain module migration
+  | "sync_write"
+  | "project_resolution"
+  | "facility_update";
 
 export interface ActiveError {
   id: string;                          // "category:normalized_message"
@@ -75,77 +83,7 @@ export function clearErrors(): void {
   errors.clear();
 }
 
-/**
- * Flush active errors to the exporter_errors Supabase table.
- * Upserts on id (the dedup key). Silently fails if Supabase is unreachable
- * (errors remain in memory for next cycle). Does not report its own failures.
- */
-export async function flushErrors(): Promise<void> {
-  const active = getActiveErrors();
-  if (active.length === 0) return;
-
-  try {
-    const rows = active.map((e) => ({
-      id: e.id,
-      category: e.category,
-      message: e.message,
-      sample_context: e.sampleContext ?? null,
-      count: e.count,
-      first_seen: e.firstSeen.toISOString(),
-      last_seen: e.lastSeen.toISOString(),
-    }));
-
-    await getSupabase()
-      .from("exporter_errors")
-      .upsert(rows, { onConflict: "id" });
-  } catch {
-    // Silent failure — errors stay in memory for next flush
-  }
-}
-
-/**
- * Prune errors not seen in the last 5 minutes from memory and Supabase.
- * Returns the number of pruned errors.
- */
-export async function pruneResolved(): Promise<number> {
-  const cutoff = Date.now() - 5 * 60 * 1000;
-  const toRemove: string[] = [];
-
-  for (const [id, err] of errors) {
-    if (err.lastSeen.getTime() < cutoff) {
-      toRemove.push(id);
-    }
-  }
-
-  if (toRemove.length === 0) return 0;
-
-  for (const id of toRemove) {
-    errors.delete(id);
-  }
-
-  try {
-    await getSupabase()
-      .from("exporter_errors")
-      .delete()
-      .in("id", toRemove);
-  } catch {
-    // Silent — rows will be cleaned up on next daemon restart anyway
-  }
-
-  return toRemove.length;
-}
-
-/**
- * Clear the exporter_errors table in Supabase.
- * Called on daemon startup — table represents live state, not history.
- */
-export async function clearErrorsTable(): Promise<void> {
-  try {
-    await getSupabase()
-      .from("exporter_errors")
-      .delete()
-      .neq("id", "");  // delete all rows
-  } catch {
-    // Silent — best-effort cleanup
-  }
+/** Remove errors by id from the in-memory store. */
+export function removeErrors(ids: string[]): void {
+  for (const id of ids) errors.delete(id);
 }

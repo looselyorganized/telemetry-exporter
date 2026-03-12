@@ -56,7 +56,8 @@ import {
   getVisibility,
 } from "../src/visibility-cache";
 import { buildSlugMap, clearSlugCache, resolveProjId, clearProjIdCache, PROJECT_ROOT } from "../src/project/slug-resolver";
-import { reportError, flushErrors, pruneResolved, clearErrors, clearErrorsTable } from "../src/errors";
+import { reportError, clearErrors } from "../src/errors";
+import { flushErrors, pruneResolved, clearErrorsTable } from "../src/db/errors";
 import { PID_FILE, isProcessRunning } from "../src/cli-output";
 import { readFileSync, writeFileSync, existsSync, unlinkSync } from "fs";
 import { join } from "path";
