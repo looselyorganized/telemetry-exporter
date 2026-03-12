@@ -47,7 +47,7 @@ export async function withRetry<T>(
   op: () => Promise<{ data: T; error: any; status?: number }>,
   label: string,
   maxRetries = 2
-): Promise<{ data: T; error: any }> {
+): Promise<{ data: T; error: any; status?: number }> {
   let lastResult: { data: T; error: any; status?: number } | undefined;
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     lastResult = await op();
@@ -192,7 +192,7 @@ export async function insertEvents(entries: LogEntry[]): Promise<InsertEventsRes
 
   for (let i = 0; i < rows.length; i += BATCH_SIZE) {
     const batch = rows.slice(i, i + BATCH_SIZE);
-    const { error } = await withRetry(
+    const { error, status } = await withRetry(
       () => supabase
         .from("events")
         .upsert(batch, { onConflict: "project_id,event_type,event_text,timestamp", ignoreDuplicates: true }),
@@ -200,7 +200,7 @@ export async function insertEvents(entries: LogEntry[]): Promise<InsertEventsRes
     );
 
     if (error) {
-      const errorStatus = (error as any)?.status ?? (error as any)?.statusCode ?? 0;
+      const errorStatus = status ?? 0;
       if (errorStatus >= 500) {
         console.error(`  events: batch ${i}-${i + batch.length} server error (HTTP ${errorStatus}), skipping per-row — will retry next cycle`);
         errors += batch.length;

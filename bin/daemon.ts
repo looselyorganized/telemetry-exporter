@@ -121,6 +121,9 @@ const knownProjects = new Set<string>();
 // Projects whose upsert failed — buffer their events until registration succeeds
 const failedRegistrations = new Set<string>();
 
+// Buffered events for failed-registration projects — drained after successful upsert
+const bufferedEvents = new Map<string, LogEntry[]>();
+
 // Directory name → slug mapping, refreshed every 60 cycles
 let slugMap: Map<string, string> = new Map();
 
@@ -217,9 +220,22 @@ async function ensureProjects(entries: LogEntry[]): Promise<void> {
       knownProjects.add(projId);
       failedRegistrations.delete(projId);
       console.log(`  Project registered: ${slug} [${projId}]${slug !== localName ? ` (dir: ${localName})` : ""} (${visibility})`);
+
+      // Drain any buffered events that were skipped while registration was failing
+      const buffered = bufferedEvents.get(projId);
+      if (buffered && buffered.length > 0) {
+        bufferedEvents.delete(projId);
+        console.log(`  Draining ${buffered.length} buffered events for ${slug} [${projId}]`);
+        const { insertedByProject } = await insertEvents(buffered);
+        const lastActiveByProject = computeLastActive(buffered);
+        for (const [pid, count] of Object.entries(insertedByProject)) {
+          const lastActive = lastActiveByProject[pid] ?? new Date();
+          await updateProjectActivity(pid, count, lastActive);
+        }
+      }
     } else {
       failedRegistrations.add(projId);
-      console.error(`  Project registration failed: ${slug} [${projId}] — will retry next cycle`);
+      console.error(`  Project registration failed: ${slug} [${projId}] — buffering events, will retry next cycle`);
     }
   }
 }
@@ -269,10 +285,20 @@ async function insertAndTrackActivity(entries: LogEntry[]): Promise<{
   inserted: number;
   errors: number;
 }> {
-  const loEntries = filterAndMapLocal(entries).filter((e) => !failedRegistrations.has(e.project));
-  const { inserted, errors, insertedByProject } = await insertEvents(loEntries);
+  const loEntries = filterAndMapLocal(entries);
+  const toInsert: LogEntry[] = [];
+  for (const entry of loEntries) {
+    if (failedRegistrations.has(entry.project)) {
+      const buf = bufferedEvents.get(entry.project) ?? [];
+      buf.push(entry);
+      bufferedEvents.set(entry.project, buf);
+    } else {
+      toInsert.push(entry);
+    }
+  }
+  const { inserted, errors, insertedByProject } = await insertEvents(toInsert);
 
-  const lastActiveByProject = computeLastActive(loEntries);
+  const lastActiveByProject = computeLastActive(toInsert);
   for (const [projId, count] of Object.entries(insertedByProject)) {
     const lastActive = lastActiveByProject[projId] ?? new Date();
     await updateProjectActivity(projId, count, lastActive);

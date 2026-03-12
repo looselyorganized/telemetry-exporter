@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readdirSync, statSync, existsSync as fsExistsSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 
@@ -11,6 +11,8 @@ import {
   loadLegacyMapping,
   clearSlugCache,
   clearProjIdCache,
+  PROJECT_ROOT,
+  buildSlugMap,
 } from "../slug-resolver";
 
 let tmpDir: string;
@@ -238,16 +240,12 @@ id: proj_from_md
 // ─── Smoke: real projects on disk resolve ────────────────────────────────────
 
 describe("smoke: all .lo/ projects resolve", () => {
-  const { readdirSync, existsSync } = require("fs");
-  const { join } = require("path");
-  const { PROJECT_ROOT, buildSlugMap, resolveProjId, clearSlugCache, clearProjIdCache } = require("../slug-resolver");
-
   // Collect every directory under PROJECT_ROOT that has a .lo/ subdirectory
   let loProjects: string[] = [];
   try {
     loProjects = readdirSync(PROJECT_ROOT).filter((d: string) => {
       const full = join(PROJECT_ROOT, d);
-      try { return readdirSync(full).length >= 0 && existsSync(join(full, ".lo")); }
+      try { return statSync(full).isDirectory() && fsExistsSync(join(full, ".lo")); }
       catch { return false; }
     });
   } catch { /* PROJECT_ROOT missing in CI — tests will be skipped */ }
@@ -256,7 +254,7 @@ describe("smoke: all .lo/ projects resolve", () => {
   const noProjects = loProjects.length === 0;
 
   test.skipIf(noProjects)("PROJECT_ROOT has .lo/ projects to test", () => {
-    expect(loProjects.length).toBeGreaterThan(0);
+    console.info(`PROJECT_ROOT contains ${loProjects.length} .lo project(s): ${loProjects.join(", ")}`);
   });
 
   test.skipIf(noProjects)("every .lo/ project resolves a non-null projId", () => {
