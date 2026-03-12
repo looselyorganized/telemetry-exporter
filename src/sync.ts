@@ -8,30 +8,25 @@ import type { ProcessDiff } from "./process/watcher";
 import type { ProjectTokenMap } from "./project/scanner";
 import { reportError } from "./errors";
 import { getSupabase, initSupabase, withRetry } from "./db/client";
+import {
+  formatTokens,
+  type ModelTokenBreakdown,
+  type FacilityMetrics,
+  type InsertEventsResult,
+  type ProjectEventAggregates,
+  type FacilityUpdate,
+  type FacilityMetricsUpdate,
+  type ProjectTelemetryUpdate,
+} from "./db/types";
 
 // Re-exports for backward compatibility
 export { initSupabase, getSupabase, withRetry };
-
-// ─── Shared types ─────────────────────────────────────────────────────────
-
-/** Token breakdown per model, keyed by model name. */
-type ModelTokenBreakdown = Record<string, Omit<ModelStats, "model">>;
-
-/** Aggregate metrics for the facility status row. */
-interface FacilityMetrics {
-  tokensLifetime: number;
-  tokensToday: number;
-  sessionsLifetime: number;
-  messagesLifetime: number;
-  modelStats: ModelTokenBreakdown;
-  hourDistribution: Record<string, number>;
-  firstSessionDate: string | null;
-}
-
-/** Format a token count as a human-readable string (e.g. "12.3M"). */
-function formatTokens(n: number): string {
-  return (n / 1e6).toFixed(1) + "M";
-}
+export {
+  type FacilityUpdate,
+  type FacilityMetricsUpdate,
+  type ProjectTelemetryUpdate,
+  type ProjectEventAggregates,
+};
 
 // ─── Projects ──────────────────────────────────────────────────────────────
 
@@ -130,12 +125,6 @@ export async function updateProjectActivity(
 
 // ─── Events ────────────────────────────────────────────────────────────────
 
-interface InsertEventsResult {
-  inserted: number;
-  errors: number;
-  insertedByProject: Record<string, number>;
-}
-
 const EMPTY_INSERT_RESULT: InsertEventsResult = { inserted: 0, errors: 0, insertedByProject: {} };
 
 /**
@@ -213,14 +202,6 @@ export async function insertEvents(entries: LogEntry[]): Promise<InsertEventsRes
 
   return { inserted, errors, insertedByProject };
 }
-
-// ─── Per-project event aggregation type ───────────────────────────────────
-
-/** project → date → { sessions, messages, toolCalls, agentSpawns, teamMessages } */
-export type ProjectEventAggregates = Map<
-  string,
-  Map<string, { sessions: number; messages: number; toolCalls: number; agentSpawns: number; teamMessages: number }>
->;
 
 // ─── Daily Metrics ─────────────────────────────────────────────────────────
 
@@ -443,12 +424,6 @@ export async function syncProjectDailyMetrics(
 
 // ─── Facility Status ───────────────────────────────────────────────────────
 
-export interface FacilityUpdate extends FacilityMetrics {
-  status: "active" | "dormant";
-  activeAgents: number;
-  activeProjects: Array<{ name: string; active: boolean }>;
-}
-
 /** Map FacilityMetrics fields to the DB column names. */
 function metricsToRow(metrics: FacilityMetrics): Record<string, unknown> {
   return {
@@ -504,12 +479,6 @@ export async function setFacilitySwitch(status: "active" | "dormant"): Promise<v
 // ─── Facility Metrics (aggregate only) ──────────────────────────────────────
 
 /**
- * FacilityMetricsUpdate is a type alias for FacilityMetrics.
- * Kept as a named export so callers express intent clearly.
- */
-export type FacilityMetricsUpdate = FacilityMetrics;
-
-/**
  * Update aggregate metrics on facility_status.
  * Does NOT write agent fields (status, active_agents, active_projects) --
  * those are owned by the ProcessWatcher via pushAgentState().
@@ -527,20 +496,6 @@ export async function updateFacilityMetrics(update: FacilityMetricsUpdate): Prom
 }
 
 // ─── Project Telemetry ──────────────────────────────────────────────────────
-
-export interface ProjectTelemetryUpdate {
-  projId: string;
-  tokensLifetime: number;
-  tokensToday: number;
-  modelsToday: Record<string, number>;
-  sessionsLifetime: number;
-  messagesLifetime: number;
-  toolCallsLifetime: number;
-  agentSpawnsLifetime: number;
-  teamMessagesLifetime: number;
-  activeAgents: number;
-  agentCount: number;
-}
 
 interface ProjectTelemetryRow {
   id: string;
