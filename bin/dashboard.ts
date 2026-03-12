@@ -72,7 +72,23 @@ async function getSnapshot(): Promise<{ local: LocalData; remote: RemoteData }> 
 
 async function handleHealth(): Promise<Response> {
   const { local, remote } = await getSnapshot();
-  return Response.json(buildHealth(local, remote));
+  const health = buildHealth(local, remote);
+
+  const { count } = await supabase
+    .from("exporter_errors")
+    .select("*", { count: "exact", head: true });
+
+  return Response.json({ ...health, errorCount: count ?? 0 });
+}
+
+async function handleErrors(): Promise<Response> {
+  const { data, error } = await supabase
+    .from("exporter_errors")
+    .select("*")
+    .order("last_seen", { ascending: false });
+
+  if (error) return Response.json({ error: error.message }, { status: 500 });
+  return Response.json(data ?? []);
 }
 
 async function handleCompare(type: string): Promise<Response> {
@@ -259,6 +275,47 @@ function dashboardHtml(): string {
   }
   .refresh-btn:hover { color: #e0e0e0; border-color: #888; }
   .loading { color: #555; font-style: italic; padding: 20px; text-align: center; font-size: 12px; }
+  .error-table { width: 100%; font-size: 12px; border-collapse: collapse; }
+  .error-table th {
+    text-align: left;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: #666;
+    padding: 6px 8px;
+    border-bottom: 1px dashed #333;
+  }
+  .error-table td { padding: 6px 8px; border-bottom: 1px solid #1a1a1a; }
+  .error-table tr { cursor: pointer; }
+  .error-table tr:hover { background: #1a1a1a; }
+  .cat-badge {
+    font-size: 10px;
+    padding: 2px 6px;
+    border-radius: 3px;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+  .cat-sync_write { background: #3d2e00; color: #ffc850; }
+  .cat-project_resolution { background: #2e003d; color: #c850ff; }
+  .cat-supabase_transient { background: #003d2e; color: #50ffc8; }
+  .cat-facility_update { background: #3d0000; color: #ff5050; }
+  .error-context {
+    display: none;
+    padding: 8px 12px;
+    background: #111;
+    border: 1px dashed #282828;
+    font-size: 11px;
+    white-space: pre-wrap;
+    color: #aaa;
+    margin: 4px 8px 8px;
+  }
+  .error-context.open { display: block; }
+  .no-errors {
+    color: #50ff96;
+    padding: 24px;
+    text-align: center;
+    font-size: 13px;
+  }
   @media (max-width: 700px) { .comparison { grid-template-columns: 1fr; } }
 </style>
 </head>
@@ -280,6 +337,10 @@ function dashboardHtml(): string {
     <span class="dot" id="supabase-dot"></span>
     <span>Supabase: <span id="supabase-status">...</span></span>
   </div>
+  <div class="health-item">
+    <span class="dot" id="errors-dot"></span>
+    <span>Errors: <span id="errors-status">...</span></span>
+  </div>
   <div class="health-item dim">
     <span>Last sync: <span id="last-sync">...</span></span>
   </div>
@@ -291,6 +352,7 @@ function dashboardHtml(): string {
   <button class="tab" data-tab="tokens">Tokens</button>
   <button class="tab" data-tab="models">Models</button>
   <button class="tab" data-tab="projects">Projects</button>
+  <button class="tab" data-tab="errors">Errors</button>
 </div>
 
 <div class="panel active" id="panel-events"><p class="loading">Loading...</p></div>
@@ -298,6 +360,7 @@ function dashboardHtml(): string {
 <div class="panel" id="panel-tokens"><p class="loading">Loading...</p></div>
 <div class="panel" id="panel-models"><p class="loading">Loading...</p></div>
 <div class="panel" id="panel-projects"><p class="loading">Loading...</p></div>
+<div class="panel" id="panel-errors"><p class="loading">Loading...</p></div>
 
 <script>
 const REFRESH_INTERVAL = 30000;
@@ -432,12 +495,85 @@ function fetchHealth() {
       supaDot.className = 'dot ' + (h.supabase.connected ? 'green' : 'red');
       supaStatus.textContent = h.supabase.connected ? 'connected (' + h.supabase.latencyMs + 'ms)' : 'disconnected';
 
+      var errorsDot = document.getElementById('errors-dot');
+      var errorsStatus = document.getElementById('errors-status');
+      errorsDot.className = 'dot ' + (h.errorCount > 0 ? 'red' : 'green');
+      errorsStatus.textContent = h.errorCount > 0 ? String(h.errorCount) : 'none';
+
       document.getElementById('last-sync').textContent = h.lastSyncAgo || 'never';
     })
     .catch(function() {
       document.getElementById('daemon-dot').className = 'dot yellow';
       document.getElementById('supabase-dot').className = 'dot yellow';
     });
+}
+
+function renderErrors(panel, data) {
+  while (panel.firstChild) panel.removeChild(panel.firstChild);
+
+  if (!data || data.length === 0) {
+    panel.appendChild(el('div', 'no-errors', 'No active errors'));
+    return;
+  }
+
+  var table = el('table', 'error-table');
+  var thead = el('thead');
+  var hrow = el('tr');
+  ['Category', 'Message', 'Count', 'First Seen', 'Last Seen'].forEach(function(h) {
+    hrow.appendChild(el('th', '', h));
+  });
+  thead.appendChild(hrow);
+  table.appendChild(thead);
+
+  var tbody = el('tbody');
+  for (var i = 0; i < data.length; i++) {
+    var err = data[i];
+    var row = el('tr');
+
+    var catCell = el('td');
+    var badge = el('span', 'cat-badge cat-' + err.category, err.category.replace('_', ' '));
+    catCell.appendChild(badge);
+    row.appendChild(catCell);
+
+    row.appendChild(el('td', '', err.message));
+    row.appendChild(el('td', '', String(err.count)));
+    row.appendChild(el('td', 'dim', new Date(err.first_seen).toLocaleTimeString()));
+    row.appendChild(el('td', '', new Date(err.last_seen).toLocaleTimeString()));
+
+    var contextId = 'ctx-' + i;
+    row.dataset.contextId = contextId;
+    row.addEventListener('click', (function(cid) {
+      return function() {
+        var ctxEl = document.getElementById(cid);
+        if (ctxEl) ctxEl.classList.toggle('open');
+      };
+    })(contextId));
+
+    tbody.appendChild(row);
+
+    if (err.sample_context) {
+      var ctxRow = el('tr');
+      var ctxCell = el('td');
+      ctxCell.colSpan = 5;
+      var ctxDiv = el('div', 'error-context');
+      ctxDiv.id = contextId;
+      ctxDiv.textContent = JSON.stringify(err.sample_context, null, 2);
+      ctxCell.appendChild(ctxDiv);
+      ctxRow.appendChild(ctxCell);
+      tbody.appendChild(ctxRow);
+    }
+  }
+
+  table.appendChild(tbody);
+  panel.appendChild(table);
+}
+
+function fetchErrors() {
+  var panel = document.getElementById('panel-errors');
+  return fetch('/api/errors')
+    .then(function(res) { return res.json(); })
+    .then(function(data) { renderErrors(panel, data); })
+    .catch(function(err) { showError(panel, err.message); });
 }
 
 function refreshAll() {
@@ -450,7 +586,8 @@ function refreshAll() {
     fetchPanel('metrics'),
     fetchPanel('tokens'),
     fetchPanel('models'),
-    fetchPanel('projects')
+    fetchPanel('projects'),
+    fetchErrors()
   ]).then(function() {
     var dur = Date.now() - start;
     document.getElementById('refresh-status').textContent =
@@ -487,6 +624,10 @@ const server = Bun.serve({
 
       if (path === "/api/health") {
         return await handleHealth();
+      }
+
+      if (path === "/api/errors") {
+        return await handleErrors();
       }
 
       const compareMatch = path.match(/^\/api\/compare\/(events|metrics|tokens|models|projects)$/);
