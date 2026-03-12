@@ -51,7 +51,7 @@ export async function withRetry<T>(
   let lastResult: { data: T; error: any; status?: number } | undefined;
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     lastResult = await op();
-    const status = (lastResult as any).status ?? 0;
+    const status = lastResult.status ?? 0;
     if (!lastResult.error || status < 500) return lastResult;
     if (attempt < maxRetries) {
       const delay = 1000 * 2 ** attempt;
@@ -98,14 +98,14 @@ export async function upsertProject(
   let localNames: string[] | null = (data?.local_names as string[] | undefined) ?? null;
 
   if (error) {
-    // Upsert failed (e.g. first_seen immutable) — fall back to updating mutable fields
+    // Upsert failed (e.g. first_seen immutable) — fall back to updating convergent fields
     const { data: fallback, error: updateError } = await supabase
       .from("projects")
       .update({
-        last_active: now.toISOString(),
-        visibility,
         content_slug: contentSlug,
+        visibility: visibility === "public" ? "public" : "private",
         state: visibility === "public" ? "public" : "private",
+        last_active: now.toISOString(),
       })
       .eq("id", projId)
       .select("local_names")
@@ -202,10 +202,13 @@ export async function insertEvents(entries: LogEntry[]): Promise<InsertEventsRes
     if (error) {
       const errorStatus = status ?? 0;
       if (errorStatus >= 500) {
-        console.error(`  events: batch ${i}-${i + batch.length} server error (HTTP ${errorStatus}), skipping per-row — will retry next cycle`);
+        // Server error — don't amplify with per-row retries, let next cycle handle it
+        console.error(`  events: batch ${i}-${i + batch.length} failed (HTTP ${errorStatus}: ${error.message}), skipping — will retry next cycle`);
         errors += batch.length;
         continue;
       }
+
+      // Non-5xx (FK violation, constraint error, etc.) — try per-row recovery
       console.error(`  events: batch ${i}-${i + batch.length} failed (${error.message}), falling back to per-row`);
       let recovered = 0;
       for (const row of batch) {

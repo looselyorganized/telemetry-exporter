@@ -100,14 +100,14 @@ describe("withRetry", () => {
       }
       return Promise.resolve({ data: "recovered", error: null, status: 200 });
     };
-    // maxRetries=0: loop runs once (attempt=0, 5xx), then final call succeeds
-    const result = await withRetry(op, "test", 0);
+    // maxRetries=1: loop runs attempt=0 (5xx), then attempt=1 (success)
+    const result = await withRetry(op, "test", 1);
     expect(calls).toBe(2);
     expect(result.data).toBe("recovered");
     expect(result.error).toBeNull();
   });
 
-  test("returns error after exhausting all retries", async () => {
+  test("returns last error after exhausting all retries (no extra call)", async () => {
     let calls = 0;
     const op = () => {
       calls++;
@@ -117,9 +117,9 @@ describe("withRetry", () => {
         status: 500,
       });
     };
-    // maxRetries=0: loop runs once (attempt=0), then 1 final call = 2 total
+    // maxRetries=0: loop runs once (attempt=0), returns last result — no extra op() call
     const result = await withRetry(op, "test", 0);
-    expect(calls).toBe(2);
+    expect(calls).toBe(1);
     expect(result.error.message).toBe("always fails");
   });
 
