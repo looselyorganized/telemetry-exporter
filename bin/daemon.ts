@@ -347,7 +347,7 @@ async function backfill(): Promise<void> {
 
   // 7. Scan and sync per-project token metrics + event counts from JSONL files
   console.log("  Scanning JSONL files for per-project tokens...");
-  const projectTokenMap = scanProjectTokens();
+  const projectTokenMap = scanProjectTokens(resolver);
   cachedTokensByProject = computeTokensByProject(projectTokenMap);
   const projectEventAggregates = aggregateProjectEventsLocal(allEntries);
   const projectSynced = await syncProjectDailyMetrics(projectTokenMap, projectEventAggregates);
@@ -494,7 +494,7 @@ async function maybeSyncProjectDailyMetrics(): Promise<void> {
   if (today === lastProjectSync) return;
 
   try {
-    const projectTokenMap = scanProjectTokens();
+    const projectTokenMap = scanProjectTokens(resolver);
     cachedTokensByProject = computeTokensByProject(projectTokenMap);
     const projectEventAggregates = aggregateProjectEventsLocal(allSeenEntries);
     await syncProjectDailyMetrics(projectTokenMap, projectEventAggregates);
@@ -541,7 +541,7 @@ async function refreshLifetimeCountersFromDb(): Promise<void> {
  */
 async function refreshProjectCachesFromDisk(): Promise<void> {
   const today = todayDateString();
-  const projectTokenMap = scanProjectTokens();
+  const projectTokenMap = scanProjectTokens(resolver);
   cachedTokensByProject = computeTokensByProject(projectTokenMap);
   refreshTodayTokensCache(projectTokenMap, today);
   await refreshLifetimeCountersFromDb();
@@ -638,7 +638,7 @@ async function gapBackfill(allEntries: LogEntry[]): Promise<void> {
   }
 
   // Scan JSONL files for per-project tokens (full scan, idempotent)
-  const projectTokenMap = scanProjectTokens();
+  const projectTokenMap = scanProjectTokens(resolver);
   cachedTokensByProject = computeTokensByProject(projectTokenMap);
   const projectEventAggregates = aggregateProjectEventsLocal(allSeenEntries);
   const projectSynced = await syncProjectDailyMetrics(
