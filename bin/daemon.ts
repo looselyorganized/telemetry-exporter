@@ -56,6 +56,7 @@ import {
   getVisibility,
 } from "../src/visibility-cache";
 import { buildSlugMap, clearSlugCache, resolveProjId, clearProjIdCache, PROJECT_ROOT } from "../src/project/slug-resolver";
+import { reportError, flushErrors, pruneResolved, clearErrors, clearErrorsTable } from "../src/errors";
 import { PID_FILE, isProcessRunning } from "../src/cli-output";
 import { readFileSync, writeFileSync, existsSync, unlinkSync } from "fs";
 import { join } from "path";
@@ -110,6 +111,10 @@ console.log();
 
 initSupabase(SUPABASE_URL, SUPABASE_KEY);
 loadVisibilityCache();
+
+// Clear live error state from previous runs
+clearErrors();
+await clearErrorsTable();
 
 const tailer = new LogTailer();
 
@@ -469,6 +474,7 @@ async function maybeSyncProjectDailyMetrics(): Promise<void> {
     lastProjectSync = today;
   } catch (err) {
     console.error("Error syncing project daily metrics:", err);
+    reportError("sync_write", `maybeSyncProjectDailyMetrics: ${err instanceof Error ? err.message : String(err)}`);
   }
 }
 
@@ -529,6 +535,7 @@ async function maybePruneEvents(): Promise<void> {
     lastPruneDate = today;
   } catch (err) {
     console.error("Error pruning events:", err);
+    reportError("sync_write", `maybePruneEvents: ${err instanceof Error ? err.message : String(err)}`);
   }
 }
 
@@ -702,6 +709,7 @@ async function main(): Promise<void> {
         }
       } catch (err) {
         console.error("Watcher error:", err);
+        reportError("facility_update", `watcherLoop: ${err instanceof Error ? err.message : String(err)}`);
       }
       await Bun.sleep(250);
     }
@@ -727,8 +735,13 @@ async function main(): Promise<void> {
           pruneSeenEntries();
         }
         cycleCount++;
+
+        // Flush error state to Supabase and prune resolved errors
+        await flushErrors();
+        await pruneResolved();
       } catch (err) {
         console.error("Aggregate sync error:", err);
+        reportError("sync_write", `aggregateLoop: ${err instanceof Error ? err.message : String(err)}`);
       }
       await Bun.sleep(5000);
     }
