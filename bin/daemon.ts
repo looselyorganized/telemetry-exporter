@@ -250,7 +250,7 @@ function sumLifetimeField(field: keyof LifetimeCounters): number {
   return total;
 }
 
-/** Aggregate per-project events using the local projIdMap resolver. */
+/** Aggregate per-project events using the ProjectResolver. */
 function aggregateProjectEventsLocal(entries: LogEntry[]): ProjectEventAggregates {
   return aggregateProjectEvents(entries, toProjId);
 }

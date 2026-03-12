@@ -9,6 +9,7 @@ import {
   extractUsageRecords,
   computeTokensByProject,
   resolveProjectName,
+  resolveProjIdForDir,
   type ProjectTokenMap,
 } from "../scanner";
 import { clearSlugCache, clearProjIdCache, PROJECT_ROOT } from "../slug-resolver";
@@ -241,6 +242,40 @@ describe("computeTokensByProject", () => {
 
   test("returns empty object for empty map", () => {
     expect(computeTokensByProject(new Map())).toEqual({});
+  });
+});
+
+// ─── resolveProjIdForDir with resolver ────────────────────────────────────────
+
+describe("resolveProjIdForDir with resolver", () => {
+  // Minimal ProjectResolver-like object for testing the resolver code path
+  function fakeResolver(map: Record<string, { projId: string; slug: string }>) {
+    return {
+      resolve: (name: string) => map[name] ?? null,
+    } as any;
+  }
+
+  test("resolves via plain name when resolver is provided", () => {
+    const resolver = fakeResolver({
+      "telemetry-exporter": { projId: "proj_abc", slug: "telemetry-exporter" },
+    });
+    // The encoded name for this repo under PROJECT_ROOT
+    const encodedRoot = PROJECT_ROOT.replace(/\//g, "-");
+    const encoded = `${encodedRoot}-telemetry-exporter`;
+    expect(resolveProjIdForDir(encoded, resolver)).toBe("proj_abc");
+  });
+
+  test("falls back to encoded name lookup (legacy entries)", () => {
+    const resolver = fakeResolver({
+      "legacy-encoded-name": { projId: "proj_legacy", slug: "legacy" },
+    });
+    // Encoded name that doesn't match any disk project
+    expect(resolveProjIdForDir("legacy-encoded-name", resolver)).toBe("proj_legacy");
+  });
+
+  test("returns null when resolver has no match", () => {
+    const resolver = fakeResolver({});
+    expect(resolveProjIdForDir("unknown-dir", resolver)).toBeNull();
   });
 });
 

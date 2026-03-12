@@ -95,6 +95,24 @@ describe("ProjectResolver", () => {
       }
     });
 
+    test("gracefully degrades when Supabase throws", async () => {
+      // Create a client whose .from().select() throws
+      const throwingClient = {
+        from: () => ({
+          select: () => { throw new Error("network timeout"); },
+        }),
+      } as any;
+
+      await resolver.refresh(throwingClient);
+
+      // Disk + org-root + legacy should still populate
+      const stats = resolver.stats();
+      expect(stats.fromDisk).toBeGreaterThanOrEqual(2);
+      expect(stats.fromSupabase).toBe(0);
+      expect(resolver.resolve("lo")).not.toBeNull();
+      expect(resolver.resolve("telemetry-exporter")).not.toBeNull();
+    });
+
     test("disk wins over Supabase on conflicts", async () => {
       await resolver.refresh(getSupabase());
       const diskResult = resolver.resolve("telemetry-exporter");
