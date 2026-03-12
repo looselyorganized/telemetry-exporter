@@ -209,9 +209,13 @@ async function ensureProjects(entries: LogEntry[]): Promise<void> {
     const slug = projIdToSlug.get(projId) ?? "";
     const visibility = getVisibility(localName);
     const firstEntry = entries.find((e) => toProjId(e.project) === projId);
-    await upsertProject(projId, slug, localName, visibility, firstEntry?.parsedTimestamp ?? undefined);
-    knownProjects.add(projId);
-    console.log(`  Project registered: ${slug} [${projId}]${slug !== localName ? ` (dir: ${localName})` : ""} (${visibility})`);
+    const ok = await upsertProject(projId, slug, localName, visibility, firstEntry?.parsedTimestamp ?? undefined);
+    if (ok) {
+      knownProjects.add(projId);
+      console.log(`  Project registered: ${slug} [${projId}]${slug !== localName ? ` (dir: ${localName})` : ""} (${visibility})`);
+    } else {
+      console.error(`  Project registration failed: ${slug} [${projId}] — will retry next cycle`);
+    }
   }
 }
 
@@ -719,11 +723,14 @@ async function main(): Promise<void> {
           const statsCache = readStatsCache();
           await refreshMaps();
           await refreshProjectCachesFromDisk();
-          await Promise.all([
+          const settled = await Promise.allSettled([
             maybeSyncDailyMetrics(statsCache),
             maybeSyncProjectDailyMetrics(),
             maybePruneEvents(),
           ]);
+          for (const r of settled) {
+            if (r.status === "rejected") console.error("  Periodic task failed:", r.reason);
+          }
           pruneSeenEntries();
         }
         cycleCount++;
