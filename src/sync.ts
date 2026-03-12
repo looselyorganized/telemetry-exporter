@@ -41,6 +41,27 @@ export function getSupabase(): SupabaseClient {
   return supabase;
 }
 
+// ─── Retry helper ───────────────────────────────────────────────────────────
+
+export async function withRetry<T>(
+  op: () => Promise<{ data: T; error: any; status?: number }>,
+  label: string,
+  maxRetries = 2
+): Promise<{ data: T; error: any; status?: number }> {
+  let lastResult: { data: T; error: any; status?: number } | undefined;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    lastResult = await op();
+    const status = lastResult.status ?? 0;
+    if (!lastResult.error || status < 500) return lastResult;
+    if (attempt < maxRetries) {
+      const delay = 1000 * 2 ** attempt;
+      console.warn(`  ${label}: transient error (HTTP ${status}), retry ${attempt + 1}/${maxRetries} in ${delay}ms`);
+      await Bun.sleep(delay);
+    }
+  }
+  return lastResult!;
+}
+
 // ─── Projects ──────────────────────────────────────────────────────────────
 
 /**
@@ -54,7 +75,7 @@ export async function upsertProject(
   localName: string,
   visibility: "public" | "private",
   timestamp?: Date
-): Promise<void> {
+): Promise<boolean> {
   const now = timestamp ?? new Date();
   const { data, error } = await supabase
     .from("projects")
@@ -77,29 +98,37 @@ export async function upsertProject(
   let localNames: string[] | null = (data?.local_names as string[] | undefined) ?? null;
 
   if (error) {
-    // Upsert failed (e.g. first_seen immutable) — fall back to updating last_active
+    // Upsert failed (e.g. first_seen immutable) — fall back to updating convergent fields
     const { data: fallback, error: updateError } = await supabase
       .from("projects")
-      .update({ last_active: now.toISOString(), visibility })
+      .update({
+        content_slug: contentSlug,
+        visibility: visibility === "public" ? "public" : "private",
+        state: visibility === "public" ? "public" : "private",
+        last_active: now.toISOString(),
+      })
       .eq("id", projId)
       .select("local_names")
       .single();
     if (updateError) {
-      console.error(`  Failed to register project ${projId}:`, error.message);
-      return;
+      console.error(`  Failed to register project ${projId}:`, updateError.message);
+      return false;
     }
     localNames = (fallback?.local_names as string[] | undefined) ?? null;
   }
 
   // Merge localName into local_names if it's not already present
-  if (localName && localName !== contentSlug && localNames) {
-    if (!localNames.includes(localName)) {
+  if (localName && localName !== contentSlug) {
+    const names = localNames ?? [];
+    if (!names.includes(localName)) {
       await supabase
         .from("projects")
-        .update({ local_names: [...localNames, localName] })
+        .update({ local_names: [...names, localName] })
         .eq("id", projId);
     }
   }
+
+  return true;
 }
 
 /**
@@ -163,13 +192,40 @@ export async function insertEvents(entries: LogEntry[]): Promise<InsertEventsRes
 
   for (let i = 0; i < rows.length; i += BATCH_SIZE) {
     const batch = rows.slice(i, i + BATCH_SIZE);
-    const { error } = await supabase
-      .from("events")
-      .upsert(batch, { onConflict: "project_id,event_type,event_text,timestamp", ignoreDuplicates: true });
+    const { error, status } = await withRetry(
+      () => supabase
+        .from("events")
+        .upsert(batch, { onConflict: "project_id,event_type,event_text,timestamp", ignoreDuplicates: true }),
+      `events batch ${i}-${i + batch.length}`
+    );
 
     if (error) {
-      console.error(`  Error inserting batch ${i}-${i + batch.length}:`, error.message);
-      errors += batch.length;
+      const errorStatus = status ?? 0;
+      if (errorStatus >= 500) {
+        // Server error — don't amplify with per-row retries, let next cycle handle it
+        console.error(`  events: batch ${i}-${i + batch.length} failed (HTTP ${errorStatus}: ${error.message}), skipping — will retry next cycle`);
+        errors += batch.length;
+        continue;
+      }
+
+      // Non-5xx (FK violation, constraint error, etc.) — try per-row recovery
+      console.error(`  events: batch ${i}-${i + batch.length} failed (${error.message}), falling back to per-row`);
+      let recovered = 0;
+      for (const row of batch) {
+        const { error: rowError } = await supabase
+          .from("events")
+          .upsert(row, { onConflict: "project_id,event_type,event_text,timestamp", ignoreDuplicates: true });
+        if (rowError) {
+          errors++;
+        } else {
+          inserted++;
+          recovered++;
+          if (row.project_id) {
+            insertedByProject[row.project_id] = (insertedByProject[row.project_id] ?? 0) + 1;
+          }
+        }
+      }
+      console.log(`  events: ${recovered}/${batch.length} recovered (batch fallback)`);
       continue;
     }
 
