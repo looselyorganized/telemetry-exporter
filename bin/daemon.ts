@@ -214,7 +214,8 @@ async function ensureProjects(entries: LogEntry[]): Promise<void> {
     const slug = projIdToSlug.get(projId) ?? "";
     const visibility = getVisibility(localName);
     const firstEntry = entries.find((e) => toProjId(e.project) === projId);
-    await upsertProject(projId, slug, localName, visibility, firstEntry?.parsedTimestamp ?? undefined);
+    const registered = await upsertProject(projId, slug, localName, visibility, firstEntry?.parsedTimestamp ?? undefined);
+    if (!registered) continue;
     knownProjects.add(projId);
     console.log(`  Project registered: ${slug} [${projId}]${slug !== localName ? ` (dir: ${localName})` : ""} (${visibility})`);
   }
@@ -735,13 +736,17 @@ async function main(): Promise<void> {
           pruneSeenEntries();
         }
         cycleCount++;
-
-        // Flush error state to Supabase and prune resolved errors
-        await flushErrors();
-        await pruneResolved();
       } catch (err) {
         console.error("Aggregate sync error:", err);
         reportError("sync_write", `aggregateLoop: ${err instanceof Error ? err.message : String(err)}`);
+      } finally {
+        // Always flush error state and prune resolved errors each cycle
+        try {
+          await flushErrors();
+          await pruneResolved();
+        } catch (e) {
+          console.error("flush/prune error", e);
+        }
       }
       await Bun.sleep(5000);
     }

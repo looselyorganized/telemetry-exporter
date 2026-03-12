@@ -55,7 +55,7 @@ export async function upsertProject(
   localName: string,
   visibility: "public" | "private",
   timestamp?: Date
-): Promise<void> {
+): Promise<boolean> {
   const now = timestamp ?? new Date();
   const { data, error } = await supabase
     .from("projects")
@@ -86,9 +86,9 @@ export async function upsertProject(
       .select("local_names")
       .single();
     if (updateError) {
-      console.error(`  Failed to register project ${projId}:`, error.message);
-      reportError("project_resolution", `upsertProject failed: ${error.message}`, { project_id: projId, slug: contentSlug });
-      return;
+      console.error(`  Failed to register project ${projId}:`, updateError.message);
+      reportError("project_resolution", `upsertProject failed: ${updateError.message}`, { project_id: projId, slug: contentSlug });
+      return false;
     }
     localNames = (fallback?.local_names as string[] | undefined) ?? null;
   }
@@ -102,6 +102,7 @@ export async function upsertProject(
         .eq("id", projId);
     }
   }
+  return true;
 }
 
 /**

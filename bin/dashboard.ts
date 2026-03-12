@@ -74,10 +74,11 @@ async function handleHealth(): Promise<Response> {
   const { local, remote } = await getSnapshot();
   const health = buildHealth(local, remote);
 
-  const { count } = await supabase
+  const { count, error: countError } = await supabase
     .from("exporter_errors")
     .select("*", { count: "exact", head: true });
 
+  if (countError) return Response.json({ error: countError.message }, { status: 500 });
   return Response.json({ ...health, errorCount: count ?? 0 });
 }
 
