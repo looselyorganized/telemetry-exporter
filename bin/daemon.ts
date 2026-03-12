@@ -56,7 +56,8 @@ import {
   loadVisibilityCache,
   getVisibility,
 } from "../src/visibility-cache";
-import { buildSlugMap, clearSlugCache, resolveProjId, clearProjIdCache, PROJECT_ROOT } from "../src/project/slug-resolver";
+import { ProjectResolver } from "../src/project/resolver";
+import { PROJECT_ROOT } from "../src/project/slug-resolver";
 import { reportError, clearErrors } from "../src/errors";
 import { flushErrors, pruneResolved, clearErrorsTable } from "../src/db/errors";
 import { PID_FILE, isProcessRunning } from "../src/cli-output";
@@ -134,44 +135,25 @@ const bufferedEvents = new Map<string, LogEntry[]>();
 // Maximum events to buffer per project while registration is pending
 const MAX_BUFFERED_EVENTS_PER_PROJECT = 1000;
 
-// Directory name → slug mapping, refreshed every 60 cycles
-let slugMap: Map<string, string> = new Map();
+// Single resolution authority for dirName → projId/slug mapping
+const resolver = new ProjectResolver();
 
-// Directory name → projId mapping, refreshed every 60 cycles
-let projIdMap: Map<string, string> = new Map();
-
-// Org-root directory names that should map to the org-root project
-const ORG_ROOT_ID = "proj_org-root";
-const ORG_ROOT_NAMES = ["looselyorganized", "lo"];
-
-async function refreshMaps(): Promise<void> {
-  clearSlugCache();
-  clearProjIdCache();
-  slugMap = buildSlugMap();
-
-  projIdMap = new Map();
-  for (const [dirName] of slugMap) {
-    const projId = resolveProjId(join(PROJECT_ROOT, dirName));
-    if (projId) projIdMap.set(dirName, projId);
-  }
-
-  // Map org-root directory names so events from the parent dir are tracked
-  for (const name of ORG_ROOT_NAMES) {
-    projIdMap.set(name, ORG_ROOT_ID);
-    slugMap.set(name, "org-root");
-  }
-
-  console.log(`  Project maps: ${projIdMap.size} projects mapped`);
+async function refreshResolver(): Promise<void> {
+  await resolver.refresh(getSupabase());
+  const stats = resolver.stats();
+  console.log(
+    `  Project maps: ${stats.total} projects mapped (disk: ${stats.fromDisk}, supabase: ${stats.fromSupabase}, legacy: ${stats.fromLegacy})`
+  );
 }
 
 /** Map a directory name (from events.log) to its content_slug, or null if not a LO project */
 function toSlug(dirName: string): string | null {
-  return slugMap.get(dirName) ?? null;
+  return resolver.resolve(dirName)?.slug ?? null;
 }
 
 /** Map a directory name (from events.log) to its project id, or null if not a LO project */
 function toProjId(dirName: string): string | null {
-  return projIdMap.get(dirName) ?? null;
+  return resolver.resolve(dirName)?.projId ?? null;
 }
 
 /** Filter entries to only LO projects and map project fields to projIds */
@@ -332,7 +314,7 @@ async function backfill(): Promise<void> {
   console.log("Starting backfill...");
 
   // 1. Build slug + projId maps
-  await refreshMaps();
+  await refreshResolver();
 
   // 2. Read all events
   console.log("  Reading events.log...");
@@ -685,7 +667,7 @@ async function main(): Promise<void> {
     await backfill();
   } else {
     // Build initial slug + projId maps
-    await refreshMaps();
+    await refreshResolver();
 
     // Read all existing entries (sets tailer offset to end of file)
     console.log("Reading log file...");
@@ -774,7 +756,7 @@ async function main(): Promise<void> {
         // Periodic tasks every ~60 cycles (~5 minutes at 5s interval)
         if (cycleCount % 60 === 0 && cycleCount > 0) {
           const statsCache = readStatsCache();
-          await refreshMaps();
+          await refreshResolver();
           await refreshProjectCachesFromDisk();
           const settled = await Promise.allSettled([
             maybeSyncDailyMetrics(statsCache),
