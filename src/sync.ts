@@ -3,11 +3,14 @@
  * Pushes parsed telemetry data to the lo-site database.
  */
 
-import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import type { LogEntry, ModelStats, StatsCache } from "./parsers";
 import type { ProcessDiff } from "./process/watcher";
 import type { ProjectTokenMap } from "./project/scanner";
 import { reportError } from "./errors";
+import { getSupabase, initSupabase, withRetry } from "./db/client";
+
+// Re-exports for backward compatibility
+export { initSupabase, getSupabase, withRetry };
 
 // ─── Shared types ─────────────────────────────────────────────────────────
 
@@ -30,39 +33,6 @@ function formatTokens(n: number): string {
   return (n / 1e6).toFixed(1) + "M";
 }
 
-let supabase: SupabaseClient;
-
-export function initSupabase(url: string, serviceRoleKey: string): void {
-  supabase = createClient(url, serviceRoleKey, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
-}
-
-export function getSupabase(): SupabaseClient {
-  return supabase;
-}
-
-// ─── Retry helper ───────────────────────────────────────────────────────────
-
-export async function withRetry<T>(
-  op: () => Promise<{ data: T; error: any; status?: number }>,
-  label: string,
-  maxRetries = 2
-): Promise<{ data: T; error: any; status?: number }> {
-  let lastResult: { data: T; error: any; status?: number } | undefined;
-  for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    lastResult = await op();
-    const status = lastResult.status ?? 0;
-    if (!lastResult.error || status < 500) return lastResult;
-    if (attempt < maxRetries) {
-      const delay = 1000 * 2 ** attempt;
-      console.warn(`  ${label}: transient error (HTTP ${status}), retry ${attempt + 1}/${maxRetries} in ${delay}ms`);
-      await Bun.sleep(delay);
-    }
-  }
-  return lastResult!;
-}
-
 // ─── Projects ──────────────────────────────────────────────────────────────
 
 /**
@@ -78,7 +48,7 @@ export async function upsertProject(
   timestamp?: Date
 ): Promise<boolean> {
   const now = timestamp ?? new Date();
-  const { data, error } = await supabase
+  const { data, error } = await getSupabase()
     .from("projects")
     .upsert(
       {
@@ -100,7 +70,7 @@ export async function upsertProject(
 
   if (error) {
     // Upsert failed (e.g. first_seen immutable) — fall back to updating convergent fields
-    const { data: fallback, error: updateError } = await supabase
+    const { data: fallback, error: updateError } = await getSupabase()
       .from("projects")
       .update({
         content_slug: contentSlug,
@@ -123,7 +93,7 @@ export async function upsertProject(
   if (localName && localName !== contentSlug) {
     const names = localNames ?? [];
     if (!names.includes(localName)) {
-      await supabase
+      await getSupabase()
         .from("projects")
         .update({ local_names: [...names, localName] })
         .eq("id", projId);
@@ -141,14 +111,14 @@ export async function updateProjectActivity(
   eventCount: number,
   lastActive: Date
 ): Promise<void> {
-  const { data: current } = await supabase
+  const { data: current } = await getSupabase()
     .from("projects")
     .select("total_events")
     .eq("id", projId)
     .single();
 
   if (current) {
-    await supabase
+    await getSupabase()
       .from("projects")
       .update({
         total_events: current.total_events + eventCount,
@@ -195,7 +165,7 @@ export async function insertEvents(entries: LogEntry[]): Promise<InsertEventsRes
   for (let i = 0; i < rows.length; i += BATCH_SIZE) {
     const batch = rows.slice(i, i + BATCH_SIZE);
     const { error, status } = await withRetry(
-      () => supabase
+      () => getSupabase()
         .from("events")
         .upsert(batch, { onConflict: "project_id,event_type,event_text,timestamp", ignoreDuplicates: true }),
       `events batch ${i}-${i + batch.length}`
@@ -216,7 +186,7 @@ export async function insertEvents(entries: LogEntry[]): Promise<InsertEventsRes
       reportError("sync_write", `events: batch ${i}-${i + batch.length} failed (${error.message})`, { batchStart: i, batchEnd: i + batch.length });
       let recovered = 0;
       for (const row of batch) {
-        const { error: rowError } = await supabase
+        const { error: rowError } = await getSupabase()
           .from("events")
           .upsert(row, { onConflict: "project_id,event_type,event_text,timestamp", ignoreDuplicates: true });
         if (rowError) {
@@ -279,7 +249,7 @@ export async function syncDailyMetrics(statsCache: StatsCache): Promise<number> 
 
   // Batch fetch all existing global daily_metrics rows
   const dates = rows.map((r) => r.date);
-  const { data: existingRows } = await supabase
+  const { data: existingRows } = await getSupabase()
     .from("daily_metrics")
     .select("id, date")
     .in("date", dates)
@@ -313,7 +283,7 @@ export async function syncDailyMetrics(statsCache: StatsCache): Promise<number> 
 
   // Bulk insert new rows
   if (toInsert.length > 0) {
-    await supabase.from("daily_metrics").insert(toInsert);
+    await getSupabase().from("daily_metrics").insert(toInsert);
   }
 
   // Batch update existing rows (Supabase doesn't support bulk update by different IDs,
@@ -323,7 +293,7 @@ export async function syncDailyMetrics(statsCache: StatsCache): Promise<number> 
     const batch = toUpdate.slice(i, i + UPDATE_BATCH);
     await Promise.all(
       batch.map((u) =>
-        supabase.from("daily_metrics").update(u.data).eq("id", u.id)
+        getSupabase().from("daily_metrics").update(u.data).eq("id", u.id)
       )
     );
   }
@@ -382,7 +352,7 @@ export async function syncProjectDailyMetrics(
   const FETCH_BATCH = 500;
   for (let i = 0; i < projects.length; i += FETCH_BATCH) {
     const projectBatch = projects.slice(i, i + FETCH_BATCH);
-    const { data: existingRows } = await supabase
+    const { data: existingRows } = await getSupabase()
       .from("daily_metrics")
       .select("id, date, project_id")
       .in("project_id", projectBatch)
@@ -450,7 +420,7 @@ export async function syncProjectDailyMetrics(
   const INSERT_BATCH = 500;
   for (let i = 0; i < toInsert.length; i += INSERT_BATCH) {
     const batch = toInsert.slice(i, i + INSERT_BATCH);
-    const { error } = await supabase.from("daily_metrics").insert(batch);
+    const { error } = await getSupabase().from("daily_metrics").insert(batch);
     if (error) {
       console.error(`  Error bulk inserting project metrics:`, error.message);
       reportError("sync_write", `syncProjectDailyMetrics: bulk insert failed (${error.message})`);
@@ -463,7 +433,7 @@ export async function syncProjectDailyMetrics(
     const batch = toUpdate.slice(i, i + UPDATE_BATCH);
     await Promise.all(
       batch.map((u) =>
-        supabase.from("daily_metrics").update(u.data).eq("id", u.id)
+        getSupabase().from("daily_metrics").update(u.data).eq("id", u.id)
       )
     );
   }
@@ -498,7 +468,7 @@ function metricsToRow(metrics: FacilityMetrics): Record<string, unknown> {
  * NOTE: status is NOT written here -- it's owned by the manual switch (lo-open/lo-close).
  */
 export async function updateFacilityStatus(update: FacilityUpdate): Promise<void> {
-  const { error } = await supabase
+  const { error } = await getSupabase()
     .from("facility_status")
     .update({
       ...metricsToRow(update),
@@ -520,7 +490,7 @@ export async function updateFacilityStatus(update: FacilityUpdate): Promise<void
  * Only called by lo-open/lo-close commands and the auto-close timer.
  */
 export async function setFacilitySwitch(status: "active" | "dormant"): Promise<void> {
-  const { error } = await supabase
+  const { error } = await getSupabase()
     .from("facility_status")
     .update({ status, updated_at: new Date().toISOString() })
     .eq("id", 1);
@@ -545,7 +515,7 @@ export type FacilityMetricsUpdate = FacilityMetrics;
  * those are owned by the ProcessWatcher via pushAgentState().
  */
 export async function updateFacilityMetrics(update: FacilityMetricsUpdate): Promise<void> {
-  const { error } = await supabase
+  const { error } = await getSupabase()
     .from("facility_status")
     .update(metricsToRow(update))
     .eq("id", 1);
@@ -622,7 +592,7 @@ export async function batchUpsertProjectTelemetry(
 
   // Try batch upsert first (fast path)
   const rows = updates.map(toRow);
-  const { error } = await supabase
+  const { error } = await getSupabase()
     .from("project_telemetry")
     .upsert(rows, { onConflict: "id" });
 
@@ -632,7 +602,7 @@ export async function batchUpsertProjectTelemetry(
     reportError("sync_write", `project_telemetry: batch upsert failed (${error.message})`);
     let succeeded = 0;
     for (const update of updates) {
-      const { error: rowError } = await supabase
+      const { error: rowError } = await getSupabase()
         .from("project_telemetry")
         .upsert(toRow(update), { onConflict: "id" });
       if (rowError) {
@@ -653,7 +623,7 @@ export async function batchUpsertProjectTelemetry(
  * Read back project_telemetry rows and log any mismatches against expected values.
  */
 async function verifyProjectTelemetry(updates: ProjectTelemetryUpdate[]): Promise<void> {
-  const { data: rows } = await supabase
+  const { data: rows } = await getSupabase()
     .from("project_telemetry")
     .select("id, tokens_lifetime");
 
@@ -685,7 +655,7 @@ async function verifyProjectTelemetry(updates: ProjectTelemetryUpdate[]): Promis
  * Global rows (project IS NULL) are left untouched.
  */
 export async function deleteProjectDailyMetrics(): Promise<number> {
-  const { count, error } = await supabase
+  const { count, error } = await getSupabase()
     .from("daily_metrics")
     .delete({ count: "exact" })
     .not("project_id", "is", null);
@@ -709,7 +679,7 @@ export async function pruneOldEvents(retentionDays = 14): Promise<number> {
   const cutoff = new Date();
   cutoff.setDate(cutoff.getDate() - retentionDays);
 
-  const { count, error } = await supabase
+  const { count, error } = await getSupabase()
     .from("events")
     .delete({ count: "exact" })
     .lt("timestamp", cutoff.toISOString());
@@ -734,14 +704,14 @@ export async function pushAgentState(diff: ProcessDiff): Promise<void> {
   const now = new Date().toISOString();
 
   const projectWrites = [...diff.byProject.entries()].map(([projId, counts]) =>
-    supabase
+    getSupabase()
       .from("project_telemetry")
       .update({ active_agents: counts.active, agent_count: counts.count, updated_at: now })
       .eq("id", projId)
   );
 
   // Facility agent fields only -- status is owned by the manual switch (lo-open/lo-close)
-  const facilityWrite = supabase
+  const facilityWrite = getSupabase()
     .from("facility_status")
     .update({ active_agents: diff.facility.activeAgents, active_projects: diff.facility.activeProjects, updated_at: now })
     .eq("id", 1);
@@ -749,7 +719,7 @@ export async function pushAgentState(diff: ProcessDiff): Promise<void> {
   const activityWrites = [...diff.byProject.entries()]
     .filter(([, counts]) => counts.active > 0)
     .map(([projId]) =>
-      supabase.from("projects").update({ last_active: now }).eq("id", projId)
+      getSupabase().from("projects").update({ last_active: now }).eq("id", projId)
     );
 
   const results = await Promise.all([...projectWrites, facilityWrite, ...activityWrites]);
