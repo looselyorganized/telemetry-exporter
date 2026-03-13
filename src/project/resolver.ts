@@ -1,7 +1,7 @@
 /**
  * Single resolution authority for dirName → projId mapping.
  *
- * Consolidates all resolution paths: disk, Supabase local_names,
+ * Consolidates all resolution paths: disk, Supabase slug,
  * org-root hardcode, and legacy .project-mapping.json.
  *
  * resolve() is synchronous — the 250ms watcher loop calls it and must never await.
@@ -55,7 +55,7 @@ export class ProjectResolver {
    * Async. Rebuilds maps from disk + Supabase.
    * Resolution sources in priority order:
    * 1. Disk (ground truth) — reads project.yml/PROJECT.md from each subdirectory
-   * 2. Supabase local_names — historical directory names from the projects table
+   * 2. Supabase slug — canonical slugs from the initiatives table
    * 3. Org-root hardcode — ["looselyorganized", "lo"] → proj_org-root
    * 4. Legacy .project-mapping.json — static fallback for orphaned directories
    *
@@ -80,28 +80,20 @@ export class ProjectResolver {
       }
     }
 
-    // 2. Supabase local_names — historical directory names
+    // 2. Supabase slug — canonical slugs from the initiatives table
     try {
       const { data: projects } = await supabase
-        .from("projects")
-        .select("id, content_slug, local_names");
+        .from("initiatives")
+        .select("id, slug");
 
       for (const proj of projects ?? []) {
         const projId = proj.id as string;
-        const slug = (proj.content_slug as string) ?? projId;
+        const slug = (proj.slug as string) ?? projId;
 
-        // Add content_slug as a resolvable name (if not already from disk)
+        // Add slug as a resolvable name (if not already from disk)
         if (slug && !newMap.has(slug)) {
           newMap.set(slug, { projId, slug });
           fromSupabase++;
-        }
-
-        // Add each local_name as a resolvable name (if not already from disk)
-        for (const name of (proj.local_names as string[]) ?? []) {
-          if (!newMap.has(name)) {
-            newMap.set(name, { projId, slug });
-            fromSupabase++;
-          }
         }
       }
     } catch {
@@ -144,7 +136,7 @@ export class ProjectResolver {
 
   /**
    * Iterate all known directory name → project mappings.
-   * Includes disk, Supabase, org-root, and legacy entries.
+   * Includes disk, Supabase slug, org-root, and legacy entries.
    */
   entries(): IterableIterator<[string, ResolvedProject]> {
     return this.dirToProject.entries();

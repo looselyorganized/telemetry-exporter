@@ -244,8 +244,8 @@ describe("insertEvents", () => {
 
 describe("upsertProject", () => {
   test("returns true on successful upsert", async () => {
-    // Upsert succeeds — localName === contentSlug so no merge path
-    resultQueue.push({ data: { local_names: [] }, error: null });
+    // Upsert succeeds
+    resultQueue.push({ data: null, error: null });
 
     const ok = await upsertProject("proj_test", "test", "test", "public");
     expect(ok).toBe(true);
@@ -255,11 +255,11 @@ describe("upsertProject", () => {
     // Initial upsert fails
     resultQueue.push({
       data: null,
-      error: { message: "conflict on first_seen" },
+      error: { message: "conflict on upsert" },
     });
-    // Fallback update succeeds — localName matches existing so no merge
+    // Fallback update succeeds
     resultQueue.push({
-      data: { local_names: ["test-dir"] },
+      data: null,
       error: null,
     });
 

@@ -21,7 +21,7 @@ export async function insertEvents(entries: LogEntry[]): Promise<InsertEventsRes
     .filter((e) => e.parsedTimestamp)
     .map((e) => ({
       timestamp: e.parsedTimestamp!.toISOString(),
-      project_id: e.project,
+      initiative_id: e.project,
       branch: e.branch || null,
       emoji: e.emoji || null,
       event_type: e.eventType,
@@ -35,8 +35,8 @@ export async function insertEvents(entries: LogEntry[]): Promise<InsertEventsRes
 
   function countInserted(projectRows: typeof rows): void {
     for (const row of projectRows) {
-      if (row.project_id) {
-        insertedByProject[row.project_id] = (insertedByProject[row.project_id] ?? 0) + 1;
+      if (row.initiative_id) {
+        insertedByProject[row.initiative_id] = (insertedByProject[row.initiative_id] ?? 0) + 1;
       }
     }
   }
@@ -46,7 +46,7 @@ export async function insertEvents(entries: LogEntry[]): Promise<InsertEventsRes
     const { error, status } = await withRetry(
       () => getSupabase()
         .from("events")
-        .upsert(batch, { onConflict: "project_id,event_type,event_text,timestamp", ignoreDuplicates: true }),
+        .upsert(batch, { onConflict: "initiative_id,event_type,event_text,timestamp", ignoreDuplicates: true }),
       `events batch ${i}-${i + batch.length}`
     );
 
@@ -67,7 +67,7 @@ export async function insertEvents(entries: LogEntry[]): Promise<InsertEventsRes
       for (const row of batch) {
         const { error: rowError } = await getSupabase()
           .from("events")
-          .upsert(row, { onConflict: "project_id,event_type,event_text,timestamp", ignoreDuplicates: true });
+          .upsert(row, { onConflict: "initiative_id,event_type,event_text,timestamp", ignoreDuplicates: true });
         if (rowError) {
           errors++;
         } else {

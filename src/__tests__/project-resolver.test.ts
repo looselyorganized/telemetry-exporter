@@ -10,7 +10,7 @@ mock.module("@supabase/supabase-js", () => ({
   createClient: () => ({
     from: (table: string) => ({
       select: () => ({
-        data: table === "projects" ? mockProjectRows : [],
+        data: table === "initiatives" ? mockProjectRows : [],
         error: null,
       }),
     }),
@@ -64,41 +64,39 @@ describe("ProjectResolver", () => {
       expect(stats.total).toBeGreaterThanOrEqual(2);
     });
 
-    test("merges Supabase local_names for historical resolution", async () => {
-      // Simulate a project with historical local name
+    test("resolves Supabase slug entries not on disk", async () => {
+      // Simulate a project known to Supabase but not on local disk
       mockProjectRows.push({
         id: "proj_test123",
-        content_slug: "lorf-bot",
-        local_names: ["lo-concierge"],
+        slug: "supabase-only-project",
       });
 
       await resolver.refresh(getSupabase());
-      const result = resolver.resolve("lo-concierge");
+      const result = resolver.resolve("supabase-only-project");
       expect(result).not.toBeNull();
       expect(result!.projId).toBe("proj_test123");
     });
 
-    test("lorf-bot scenario: both current and historical names resolve to same project", async () => {
+    test("lorf-bot scenario: slug from Supabase and disk both resolve to same project", async () => {
       // Use the real projId from disk so disk + Supabase agree
       const LORF_BOT_ID = "proj_fe8141ea-c26c-4b7e-a1e5-39d2eeeed5e8";
       mockProjectRows.push({
         id: LORF_BOT_ID,
-        content_slug: "lorf-bot",
-        local_names: ["lo-concierge"],
+        slug: "lorf-bot",
       });
 
       await resolver.refresh(getSupabase());
 
+      const supabaseResult = resolver.resolve("lorf-bot");
       const diskResult = resolver.resolve("lorf-bot");
-      const historyResult = resolver.resolve("lo-concierge");
 
-      // Historical name always resolves via Supabase local_names
-      expect(historyResult).not.toBeNull();
-      expect(historyResult!.projId).toBe(LORF_BOT_ID);
+      // Slug from Supabase resolves (disk wins if present, Supabase otherwise)
+      expect(supabaseResult).not.toBeNull();
+      expect(supabaseResult!.projId).toBe(LORF_BOT_ID);
 
-      // If disk name also resolves, they must agree
+      // Disk and Supabase agree on the same slug
       if (diskResult) {
-        expect(diskResult.projId).toBe(historyResult!.projId);
+        expect(diskResult.projId).toBe(supabaseResult!.projId);
       }
     });
 
@@ -128,8 +126,7 @@ describe("ProjectResolver", () => {
         // Now add a Supabase entry with a conflicting projId
         mockProjectRows.push({
           id: "proj_imposter",
-          content_slug: "telemetry-exporter",
-          local_names: [],
+          slug: "telemetry-exporter",
         });
 
         // Re-refresh — disk should still win
@@ -158,16 +155,14 @@ describe("ProjectResolver", () => {
     test("includes supplemental projects not on disk", async () => {
       mockProjectRows.push({
         id: "proj_remote_only",
-        content_slug: "remote-project",
-        local_names: ["old-remote-name"],
+        slug: "remote-project",
       });
 
       await resolver.refresh(getSupabase());
       const allEntries = new Map(resolver.entries());
 
-      // Supabase-only entries should appear in entries()
+      // Supabase-only entries should appear in entries() via slug
       expect(allEntries.has("remote-project")).toBe(true);
-      expect(allEntries.has("old-remote-name")).toBe(true);
     });
   });
 

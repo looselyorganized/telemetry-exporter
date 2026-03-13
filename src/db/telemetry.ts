@@ -7,7 +7,7 @@ import { checkResult } from "./check-result";
 import { formatTokens, type ProjectTelemetryUpdate } from "./types";
 
 interface ProjectTelemetryRow {
-  id: string;
+  initiative_id: string;
   tokens_lifetime: number;
   tokens_today: number;
   models_today: Record<string, number>;
@@ -31,7 +31,7 @@ export async function batchUpsertProjectTelemetry(
 
   function toRow(u: ProjectTelemetryUpdate): ProjectTelemetryRow {
     const row: ProjectTelemetryRow = {
-      id: u.projId,
+      initiative_id: u.projId,
       tokens_lifetime: u.tokensLifetime,
       tokens_today: u.tokensToday,
       models_today: u.modelsToday,
@@ -58,7 +58,7 @@ export async function batchUpsertProjectTelemetry(
   const rows = updates.map(toRow);
   const { error } = await getSupabase()
     .from("project_telemetry")
-    .upsert(rows, { onConflict: "id" });
+    .upsert(rows, { onConflict: "initiative_id" });
 
   if (error) {
     // Batch failed (likely FK violation) -- fall back to per-row upserts
@@ -71,7 +71,7 @@ export async function batchUpsertProjectTelemetry(
     for (const update of updates) {
       const rowResult = await getSupabase()
         .from("project_telemetry")
-        .upsert(toRow(update), { onConflict: "id" });
+        .upsert(toRow(update), { onConflict: "initiative_id" });
       if (rowResult.error) {
         console.error(`  project_telemetry: skipping ${update.projId} (${rowResult.error.message})`);
         checkResult(rowResult, {
@@ -101,17 +101,17 @@ export async function verifyProjectTelemetry(
 ): Promise<void> {
   let query = getSupabase()
     .from("project_telemetry")
-    .select("id, tokens_lifetime");
+    .select("initiative_id, tokens_lifetime");
 
   if (projIds && projIds.length > 0) {
-    query = query.in("id", projIds);
+    query = query.in("initiative_id", projIds);
   }
 
   const { data: rows } = await query;
 
   if (!rows) return;
 
-  const dbValues = new Map(rows.map((r) => [r.id as string, Number(r.tokens_lifetime)]));
+  const dbValues = new Map(rows.map((r) => [r.initiative_id as string, Number(r.tokens_lifetime)]));
   let mismatches = 0;
 
   for (const u of updates) {
