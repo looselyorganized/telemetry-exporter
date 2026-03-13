@@ -10,7 +10,7 @@ mock.module("@supabase/supabase-js", () => ({
   createClient: () => ({
     from: (table: string) => ({
       select: () => ({
-        data: table === "initiatives" ? mockProjectRows : [],
+        data: table === "projects" ? mockProjectRows : [],
         error: null,
       }),
     }),

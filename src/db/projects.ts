@@ -6,7 +6,7 @@ import { getSupabase } from "./client";
 import { checkResult } from "./check-result";
 
 /**
- * Ensure a project exists in the initiatives table.
+ * Ensure a project exists in the projects table.
  * Upserts on id (canonical PK).
  */
 export async function upsertProject(
@@ -18,7 +18,7 @@ export async function upsertProject(
 ): Promise<boolean> {
   const now = timestamp ?? new Date();
   const { error } = await getSupabase()
-    .from("initiatives")
+    .from("projects")
     .upsert(
       {
         id: projId,
@@ -34,7 +34,7 @@ export async function upsertProject(
     // Upsert failed — fall back to updating convergent fields
     console.warn(`  upsertProject: primary upsert failed (${error.message}), trying fallback update`);
     const { error: updateError } = await getSupabase()
-      .from("initiatives")
+      .from("projects")
       .update({
         slug: contentSlug,
         state: visibility,
@@ -63,7 +63,7 @@ export async function updateProjectActivity(
   lastActive: Date
 ): Promise<boolean> {
   const result = await getSupabase()
-    .from("initiatives")
+    .from("projects")
     .update({
       last_active: lastActive.toISOString(),
     })

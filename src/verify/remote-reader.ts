@@ -8,7 +8,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 // ─── Types ──────────────────────────────────────────────────────────────────
 
 export interface RemoteEvents {
-  /** initiative_id → date → count */
+  /** projId → date → count */
   byProjectDate: Record<string, Record<string, number>>;
   totalCount: number;
 }
@@ -70,7 +70,7 @@ async function readRemoteEvents(supabase: SupabaseClient, cutoff: Date): Promise
   while (true) {
     const { data, error } = await supabase
       .from("events")
-      .select("initiative_id, timestamp")
+      .select("project_id, timestamp")
       .gte("timestamp", cutoff.toISOString())
       .range(offset, offset + PAGE_SIZE - 1);
 
@@ -78,7 +78,7 @@ async function readRemoteEvents(supabase: SupabaseClient, cutoff: Date): Promise
     ok = true;
 
     for (const row of data) {
-      const projId = row.initiative_id as string;
+      const projId = row.project_id as string;
       const date = (row.timestamp as string).split("T")[0];
       if (!byProjectDate[projId]) byProjectDate[projId] = {};
       byProjectDate[projId][date] = (byProjectDate[projId][date] ?? 0) + 1;
@@ -96,7 +96,7 @@ async function readRemoteMetrics(supabase: SupabaseClient): Promise<{ data: Remo
   const { data, error } = await supabase
     .from("daily_metrics")
     .select("date, messages, sessions, tool_calls")
-    .is("initiative_id", null)
+    .is("project_id", null)
     .order("date", { ascending: true });
 
   if (error || !data) return { data: { dailyActivity: [] }, ok: false };
@@ -117,13 +117,13 @@ async function readRemoteMetrics(supabase: SupabaseClient): Promise<{ data: Remo
 async function readRemoteTokens(supabase: SupabaseClient): Promise<{ data: RemoteTokens; ok: boolean }> {
   const { data, error } = await supabase
     .from("project_telemetry")
-    .select("initiative_id, tokens_lifetime");
+    .select("project_id, tokens_lifetime");
 
   if (error || !data) return { data: { byProject: {} }, ok: false };
 
   const byProject: Record<string, number> = {};
   for (const row of data) {
-    byProject[row.initiative_id as string] = Number(row.tokens_lifetime) || 0;
+    byProject[row.project_id as string] = Number(row.tokens_lifetime) || 0;
   }
 
   return { data: { byProject }, ok: true };
@@ -143,7 +143,7 @@ async function readRemoteModels(supabase: SupabaseClient): Promise<{ data: Remot
 
 async function readRemoteProjects(supabase: SupabaseClient): Promise<{ data: RemoteProject[]; ok: boolean }> {
   const { data, error } = await supabase
-    .from("initiatives")
+    .from("projects")
     .select("id, slug, last_active");
 
   if (error || !data) return { data: [], ok: false };

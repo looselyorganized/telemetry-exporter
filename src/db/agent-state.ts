@@ -23,7 +23,7 @@ export async function pushAgentState(diff: ProcessDiff): Promise<void> {
         agent_count: counts.count,
         updated_at: now,
       })
-      .eq("initiative_id", projId);
+      .eq("project_id", projId);
 
     checkResult(telemetryResult, {
       operation: "pushAgentState.projectTelemetry",
@@ -33,7 +33,7 @@ export async function pushAgentState(diff: ProcessDiff): Promise<void> {
 
     if (counts.active > 0) {
       const activeResult = await getSupabase()
-        .from("initiatives")
+        .from("projects")
         .update({ last_active: now })
         .eq("id", projId);
 

@@ -22,7 +22,7 @@ export async function syncDailyMetrics(statsCache: StatsCache): Promise<number> 
 
   const rows = statsCache.dailyActivity.map((day) => ({
     date: day.date,
-    initiative_id: null as string | null, // NULL = global aggregate
+    project_id: null as string | null, // NULL = global aggregate
     messages: day.messageCount,
     sessions: day.sessionCount,
     tool_calls: day.toolCallCount,
@@ -37,7 +37,7 @@ export async function syncDailyMetrics(statsCache: StatsCache): Promise<number> 
     .from("daily_metrics")
     .select("id, date")
     .in("date", dates)
-    .is("initiative_id", null);
+    .is("project_id", null);
   if (!checkResult(existingResult, { operation: "syncDailyMetrics.selectExisting", category: "metrics_sync" })) {
     return 0;
   }
@@ -50,7 +50,7 @@ export async function syncDailyMetrics(statsCache: StatsCache): Promise<number> 
 
   // Split into updates vs inserts
   const toInsert: typeof rows = [];
-  const toUpdate: Array<{ id: number; data: Omit<typeof rows[0], "date" | "initiative_id"> }> = [];
+  const toUpdate: Array<{ id: number; data: Omit<typeof rows[0], "date" | "project_id"> }> = [];
 
   for (const row of rows) {
     const existingId = existingByDate.get(row.date);
@@ -103,7 +103,7 @@ interface DailyKeyData {
 
 interface ProjectDailyMetricsInsert {
   date: string;
-  initiative_id: string;
+  project_id: string;
   tokens: Record<string, number> | null;
   sessions: number;
   messages: number;
@@ -167,8 +167,8 @@ export async function syncProjectDailyMetrics(
     const projectBatch = projects.slice(i, i + FETCH_BATCH);
     const existingResult = await getSupabase()
       .from("daily_metrics")
-      .select("id, date, initiative_id")
-      .in("initiative_id", projectBatch)
+      .select("id, date, project_id")
+      .in("project_id", projectBatch)
       .in("date", dates);
     if (!checkResult(existingResult, { operation: "syncProjectDailyMetrics.selectExisting", category: "metrics_sync" })) {
       continue;
@@ -176,7 +176,7 @@ export async function syncProjectDailyMetrics(
     const { data: existingRows } = existingResult;
 
     for (const row of existingRows ?? []) {
-      existingIdByKey.set(makeKey(row.initiative_id, row.date), row.id);
+      existingIdByKey.set(makeKey(row.project_id, row.date), row.id);
     }
   }
 
@@ -202,7 +202,7 @@ export async function syncProjectDailyMetrics(
     } else {
       toInsert.push({
         date: row.date,
-        initiative_id: row.project,
+        project_id: row.project,
         tokens: row.tokens ?? null,
         sessions: row.events?.sessions ?? 0,
         messages: row.events?.messages ?? 0,
@@ -247,7 +247,7 @@ export async function deleteProjectDailyMetrics(): Promise<number> {
   const result = await getSupabase()
     .from("daily_metrics")
     .delete({ count: "exact" })
-    .not("initiative_id", "is", null);
+    .not("project_id", "is", null);
 
   if (!checkResult(result, { operation: "deleteProjectDailyMetrics", category: "metrics_sync" })) {
     return 0;

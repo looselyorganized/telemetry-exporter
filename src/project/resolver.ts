@@ -55,7 +55,7 @@ export class ProjectResolver {
    * Async. Rebuilds maps from disk + Supabase.
    * Resolution sources in priority order:
    * 1. Disk (ground truth) — reads project.yml/PROJECT.md from each subdirectory
-   * 2. Supabase slug — canonical slugs from the initiatives table
+   * 2. Supabase slug — canonical slugs from the projects table
    * 3. Org-root hardcode — ["looselyorganized", "lo"] → proj_org-root
    * 4. Legacy .project-mapping.json — static fallback for orphaned directories
    *
@@ -80,10 +80,10 @@ export class ProjectResolver {
       }
     }
 
-    // 2. Supabase slug — canonical slugs from the initiatives table
+    // 2. Supabase slug — canonical slugs from the projects table
     try {
       const { data: projects } = await supabase
-        .from("initiatives")
+        .from("projects")
         .select("id, slug");
 
       for (const proj of projects ?? []) {

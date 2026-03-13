@@ -386,10 +386,10 @@ async function backfill(): Promise<void> {
   console.log("  Verifying backfill writes...");
   const { data: verifyRows } = await getSupabase()
     .from("project_telemetry")
-    .select("initiative_id, tokens_lifetime");
+    .select("project_id, tokens_lifetime");
   if (verifyRows) {
     for (const row of verifyRows) {
-      const projId = row.initiative_id as string;
+      const projId = row.project_id as string;
       const dbTokens = Number(row.tokens_lifetime);
       const expected = cachedTokensByProject[projId] ?? 0;
       if (dbTokens !== expected) {
@@ -401,7 +401,7 @@ async function backfill(): Promise<void> {
     }
     console.log(
       `  Verified ${verifyRows.length} project_telemetry rows:`,
-      verifyRows.map((r) => `${r.initiative_id}: ${formatTokens(Number(r.tokens_lifetime))}`).join(", ")
+      verifyRows.map((r) => `${r.project_id}: ${formatTokens(Number(r.tokens_lifetime))}`).join(", ")
     );
   }
 
@@ -544,12 +544,12 @@ async function maybeSyncProjectDailyMetrics(): Promise<void> {
 async function refreshLifetimeCountersFromDb(): Promise<void> {
   const { data: lifetimeRows } = await getSupabase()
     .from("daily_metrics")
-    .select("initiative_id, sessions, messages, tool_calls, agent_spawns, team_messages")
-    .not("initiative_id", "is", null);
+    .select("project_id, sessions, messages, tool_calls, agent_spawns, team_messages")
+    .not("project_id", "is", null);
   if (lifetimeRows) {
     const sums: Record<string, LifetimeCounters> = {};
     for (const row of lifetimeRows) {
-      const p = row.initiative_id as string;
+      const p = row.project_id as string;
       if (!sums[p]) sums[p] = { sessions: 0, messages: 0, toolCalls: 0, agentSpawns: 0, teamMessages: 0 };
       sums[p].sessions += Number(row.sessions) || 0;
       sums[p].messages += Number(row.messages) || 0;
@@ -708,11 +708,11 @@ async function main(): Promise<void> {
     console.log("  Loading cached telemetry from Supabase...");
     const { data: ptRows } = await getSupabase()
       .from("project_telemetry")
-      .select("initiative_id, tokens_lifetime, tokens_today, models_today, sessions_lifetime, messages_lifetime, tool_calls_lifetime, agent_spawns_lifetime, team_messages_lifetime");
+      .select("project_id, tokens_lifetime, tokens_today, models_today, sessions_lifetime, messages_lifetime, tool_calls_lifetime, agent_spawns_lifetime, team_messages_lifetime");
     if (ptRows && ptRows.length > 0) {
       for (const row of ptRows) {
-        cachedTokensByProject[row.initiative_id] = Number(row.tokens_lifetime) || 0;
-        cachedLifetimeCounters[row.initiative_id] = {
+        cachedTokensByProject[row.project_id] = Number(row.tokens_lifetime) || 0;
+        cachedLifetimeCounters[row.project_id] = {
           sessions: Number(row.sessions_lifetime) || 0,
           messages: Number(row.messages_lifetime) || 0,
           toolCalls: Number(row.tool_calls_lifetime) || 0,
@@ -722,7 +722,7 @@ async function main(): Promise<void> {
         const models = (row.models_today && typeof row.models_today === "object")
           ? row.models_today as Record<string, number>
           : {};
-        cachedTodayTokensByProject[row.initiative_id] = {
+        cachedTodayTokensByProject[row.project_id] = {
           total: Number(row.tokens_today) || 0,
           models,
         };
