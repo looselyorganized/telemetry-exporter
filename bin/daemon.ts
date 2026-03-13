@@ -176,7 +176,10 @@ async function drainBufferedEvents(projId: string, slug: string): Promise<void> 
 
   console.log(`  Draining ${buffered.length} buffered events for ${slug} [${projId}]`);
   try {
-    const { insertedByProject } = await insertEvents(buffered);
+    const { insertedByProject, errors } = await insertEvents(buffered);
+    if (errors > 0) {
+      console.warn(`  Drain had ${errors} failed event writes for ${slug} [${projId}] — events dropped (scanProjectTokens will recover metrics)`);
+    }
     const lastActiveByProject = computeLastActive(buffered);
     for (const [pid, count] of Object.entries(insertedByProject)) {
       const lastActive = lastActiveByProject[pid] ?? new Date();
