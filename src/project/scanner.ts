@@ -16,6 +16,7 @@ import { join } from "path";
 
 import { isDirectory } from "../utils";
 import { resolveProjId, loadLegacyMapping, normalizeFsPath, PROJECT_ROOT } from "./slug-resolver";
+import type { ProjectResolver } from "./resolver";
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
@@ -88,21 +89,38 @@ export function resolveProjectName(encodedDirName: string): string | null {
 }
 
 /**
- * Resolve an encoded ~/.claude/projects/ directory name to an id.
+ * Resolve an encoded ~/.claude/projects/ directory name to a projId.
  *
- * Two-step resolution:
- * 1. Live repos: resolveProjectName() → resolveProjId() from .lo/PROJECT.md
- * 2. Legacy/orphan dirs: falls back to static .project-mapping.json
+ * When a ProjectResolver is provided:
+ * 1. Decode encoded path → plain directory name via resolveProjectName()
+ * 2. Look up plain name in resolver (covers disk, Supabase, org-root)
+ * 3. Fallback: look up encoded name directly in resolver (covers legacy mapping)
+ *
+ * Without a resolver, falls back to original two-step resolution.
  */
-export function resolveProjIdForDir(encodedDirName: string): string | null {
-  // Try live repo path first
+export function resolveProjIdForDir(
+  encodedDirName: string,
+  resolver?: ProjectResolver
+): string | null {
   const projectName = resolveProjectName(encodedDirName);
+
+  if (resolver) {
+    // Try plain name first (disk + Supabase + org-root)
+    if (projectName) {
+      const resolved = resolver.resolve(projectName);
+      if (resolved) return resolved.projId;
+    }
+    // Try encoded name (legacy .project-mapping.json entries)
+    const legacyResolved = resolver.resolve(encodedDirName);
+    if (legacyResolved) return legacyResolved.projId;
+    return null;
+  }
+
+  // No resolver — original two-step resolution
   if (projectName) {
     const projId = resolveProjId(join(PROJECT_ROOT, projectName));
     if (projId) return projId;
   }
-
-  // Fall back to legacy mapping for orphan/renamed directories
   return loadLegacyMapping().get(encodedDirName) ?? null;
 }
 
@@ -212,7 +230,7 @@ export function extractUsageRecords(
  * Scan all JSONL session files and aggregate token usage
  * by project, date, and model.
  */
-export function scanProjectTokens(): ProjectTokenMap {
+export function scanProjectTokens(resolver?: ProjectResolver): ProjectTokenMap {
   const result: ProjectTokenMap = new Map();
 
   let projectDirs: string[];
@@ -235,7 +253,7 @@ export function scanProjectTokens(): ProjectTokenMap {
     const dirPath = join(PROJECTS_DIR, dirName);
     if (!isDirectory(dirPath)) continue;
 
-    const projId = resolveProjIdForDir(dirName);
+    const projId = resolveProjIdForDir(dirName, resolver);
     if (!projId) {
       skippedDirs++;
       continue;

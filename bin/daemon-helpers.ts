@@ -5,8 +5,9 @@
  */
 
 import type { LogEntry, ModelStats } from "../src/parsers";
-import type { ProjectEventAggregates } from "../src/sync";
+import { formatTokens, type ProjectEventAggregates } from "../src/db/types";
 
+export { formatTokens };
 export type { ProjectEventAggregates };
 
 // ─── Types (shared with daemon.ts) ──────────────────────────────────────────
@@ -31,11 +32,6 @@ export interface ProjectTelemetryInput {
 }
 
 // ─── Formatting ─────────────────────────────────────────────────────────────
-
-/** Format a token count as "1.2M" (always divides by 1e6). */
-export function formatTokens(n: number): string {
-  return (n / 1e6).toFixed(1) + "M";
-}
 
 /** Format model stats array into the JSON shape expected by facility_status / facility_metrics. */
 export function formatModelStats(modelStats: ModelStats[]): Record<string, object> {

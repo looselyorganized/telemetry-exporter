@@ -30,33 +30,36 @@ import {
 } from "./daemon-helpers";
 import { getFacilityState } from "../src/process/scanner";
 import { scanProjectTokens, computeTokensByProject } from "../src/project/scanner";
+import { initSupabase, getSupabase } from "../src/db/client";
 import {
-  initSupabase,
-  getSupabase,
-  upsertProject,
-  updateProjectActivity,
-  insertEvents,
-  syncDailyMetrics,
-  syncProjectDailyMetrics,
-  deleteProjectDailyMetrics,
-  updateFacilityStatus,
-  batchUpsertProjectTelemetry,
-  pruneOldEvents,
-  pushAgentState,
-  updateFacilityMetrics,
-  setFacilitySwitch,
   type FacilityUpdate,
   type FacilityMetricsUpdate,
   type ProjectTelemetryUpdate,
   type ProjectEventAggregates,
-} from "../src/sync";
+} from "../src/db/types";
+import { upsertProject, updateProjectActivity } from "../src/db/projects";
+import { insertEvents, pruneOldEvents } from "../src/db/events";
+import {
+  updateFacilityStatus,
+  updateFacilityMetrics,
+  setFacilitySwitch,
+} from "../src/db/facility";
+import {
+  syncDailyMetrics,
+  syncProjectDailyMetrics,
+  deleteProjectDailyMetrics,
+} from "../src/db/metrics";
+import { batchUpsertProjectTelemetry } from "../src/db/telemetry";
+import { pushAgentState } from "../src/db/agent-state";
 import { ProcessWatcher } from "../src/process/watcher";
 import {
   loadVisibilityCache,
   getVisibility,
 } from "../src/visibility-cache";
-import { buildSlugMap, clearSlugCache, resolveProjId, clearProjIdCache, PROJECT_ROOT } from "../src/project/slug-resolver";
-import { reportError, flushErrors, pruneResolved, clearErrors, clearErrorsTable } from "../src/errors";
+import { ProjectResolver } from "../src/project/resolver";
+import { PROJECT_ROOT } from "../src/project/slug-resolver";
+import { reportError, clearErrors } from "../src/errors";
+import { flushErrors, pruneResolved, clearErrorsTable } from "../src/db/errors";
 import { PID_FILE, isProcessRunning } from "../src/cli-output";
 import { readFileSync, writeFileSync, existsSync, unlinkSync } from "fs";
 import { join } from "path";
@@ -132,44 +135,25 @@ const bufferedEvents = new Map<string, LogEntry[]>();
 // Maximum events to buffer per project while registration is pending
 const MAX_BUFFERED_EVENTS_PER_PROJECT = 1000;
 
-// Directory name → slug mapping, refreshed every 60 cycles
-let slugMap: Map<string, string> = new Map();
+// Single resolution authority for dirName → projId/slug mapping
+const resolver = new ProjectResolver();
 
-// Directory name → projId mapping, refreshed every 60 cycles
-let projIdMap: Map<string, string> = new Map();
-
-// Org-root directory names that should map to the org-root project
-const ORG_ROOT_ID = "proj_org-root";
-const ORG_ROOT_NAMES = ["looselyorganized", "lo"];
-
-async function refreshMaps(): Promise<void> {
-  clearSlugCache();
-  clearProjIdCache();
-  slugMap = buildSlugMap();
-
-  projIdMap = new Map();
-  for (const [dirName] of slugMap) {
-    const projId = resolveProjId(join(PROJECT_ROOT, dirName));
-    if (projId) projIdMap.set(dirName, projId);
-  }
-
-  // Map org-root directory names so events from the parent dir are tracked
-  for (const name of ORG_ROOT_NAMES) {
-    projIdMap.set(name, ORG_ROOT_ID);
-    slugMap.set(name, "org-root");
-  }
-
-  console.log(`  Project maps: ${projIdMap.size} projects mapped`);
+async function refreshResolver(): Promise<void> {
+  await resolver.refresh(getSupabase());
+  const stats = resolver.stats();
+  console.log(
+    `  Project maps: ${stats.total} projects mapped (disk: ${stats.fromDisk}, supabase: ${stats.fromSupabase}, legacy: ${stats.fromLegacy})`
+  );
 }
 
 /** Map a directory name (from events.log) to its content_slug, or null if not a LO project */
 function toSlug(dirName: string): string | null {
-  return slugMap.get(dirName) ?? null;
+  return resolver.resolve(dirName)?.slug ?? null;
 }
 
 /** Map a directory name (from events.log) to its project id, or null if not a LO project */
 function toProjId(dirName: string): string | null {
-  return projIdMap.get(dirName) ?? null;
+  return resolver.resolve(dirName)?.projId ?? null;
 }
 
 /** Filter entries to only LO projects and map project fields to projIds */
@@ -266,7 +250,7 @@ function sumLifetimeField(field: keyof LifetimeCounters): number {
   return total;
 }
 
-/** Aggregate per-project events using the local projIdMap resolver. */
+/** Aggregate per-project events using the ProjectResolver. */
 function aggregateProjectEventsLocal(entries: LogEntry[]): ProjectEventAggregates {
   return aggregateProjectEvents(entries, toProjId);
 }
@@ -330,7 +314,7 @@ async function backfill(): Promise<void> {
   console.log("Starting backfill...");
 
   // 1. Build slug + projId maps
-  await refreshMaps();
+  await refreshResolver();
 
   // 2. Read all events
   console.log("  Reading events.log...");
@@ -363,7 +347,7 @@ async function backfill(): Promise<void> {
 
   // 7. Scan and sync per-project token metrics + event counts from JSONL files
   console.log("  Scanning JSONL files for per-project tokens...");
-  const projectTokenMap = scanProjectTokens();
+  const projectTokenMap = scanProjectTokens(resolver);
   cachedTokensByProject = computeTokensByProject(projectTokenMap);
   const projectEventAggregates = aggregateProjectEventsLocal(allEntries);
   const projectSynced = await syncProjectDailyMetrics(projectTokenMap, projectEventAggregates);
@@ -510,7 +494,7 @@ async function maybeSyncProjectDailyMetrics(): Promise<void> {
   if (today === lastProjectSync) return;
 
   try {
-    const projectTokenMap = scanProjectTokens();
+    const projectTokenMap = scanProjectTokens(resolver);
     cachedTokensByProject = computeTokensByProject(projectTokenMap);
     const projectEventAggregates = aggregateProjectEventsLocal(allSeenEntries);
     await syncProjectDailyMetrics(projectTokenMap, projectEventAggregates);
@@ -521,7 +505,7 @@ async function maybeSyncProjectDailyMetrics(): Promise<void> {
     lastProjectSync = today;
   } catch (err) {
     console.error("Error syncing project daily metrics:", err);
-    reportError("sync_write", `maybeSyncProjectDailyMetrics: ${err instanceof Error ? err.message : String(err)}`);
+    reportError("event_write", `maybeSyncProjectDailyMetrics: ${err instanceof Error ? err.message : String(err)}`);
   }
 }
 
@@ -557,7 +541,7 @@ async function refreshLifetimeCountersFromDb(): Promise<void> {
  */
 async function refreshProjectCachesFromDisk(): Promise<void> {
   const today = todayDateString();
-  const projectTokenMap = scanProjectTokens();
+  const projectTokenMap = scanProjectTokens(resolver);
   cachedTokensByProject = computeTokensByProject(projectTokenMap);
   refreshTodayTokensCache(projectTokenMap, today);
   await refreshLifetimeCountersFromDb();
@@ -582,7 +566,7 @@ async function maybePruneEvents(): Promise<void> {
     lastPruneDate = today;
   } catch (err) {
     console.error("Error pruning events:", err);
-    reportError("sync_write", `maybePruneEvents: ${err instanceof Error ? err.message : String(err)}`);
+    reportError("event_write", `maybePruneEvents: ${err instanceof Error ? err.message : String(err)}`);
   }
 }
 
@@ -654,7 +638,7 @@ async function gapBackfill(allEntries: LogEntry[]): Promise<void> {
   }
 
   // Scan JSONL files for per-project tokens (full scan, idempotent)
-  const projectTokenMap = scanProjectTokens();
+  const projectTokenMap = scanProjectTokens(resolver);
   cachedTokensByProject = computeTokensByProject(projectTokenMap);
   const projectEventAggregates = aggregateProjectEventsLocal(allSeenEntries);
   const projectSynced = await syncProjectDailyMetrics(
@@ -683,7 +667,7 @@ async function main(): Promise<void> {
     await backfill();
   } else {
     // Build initial slug + projId maps
-    await refreshMaps();
+    await refreshResolver();
 
     // Read all existing entries (sets tailer offset to end of file)
     console.log("Reading log file...");
@@ -756,7 +740,7 @@ async function main(): Promise<void> {
         }
       } catch (err) {
         console.error("Watcher error:", err);
-        reportError("facility_update", `watcherLoop: ${err instanceof Error ? err.message : String(err)}`);
+        reportError("facility_state", `watcherLoop: ${err instanceof Error ? err.message : String(err)}`);
       }
       await Bun.sleep(250);
     }
@@ -772,7 +756,7 @@ async function main(): Promise<void> {
         // Periodic tasks every ~60 cycles (~5 minutes at 5s interval)
         if (cycleCount % 60 === 0 && cycleCount > 0) {
           const statsCache = readStatsCache();
-          await refreshMaps();
+          await refreshResolver();
           await refreshProjectCachesFromDisk();
           const settled = await Promise.allSettled([
             maybeSyncDailyMetrics(statsCache),
@@ -787,7 +771,7 @@ async function main(): Promise<void> {
         cycleCount++;
       } catch (err) {
         console.error("Aggregate sync error:", err);
-        reportError("sync_write", `aggregateLoop: ${err instanceof Error ? err.message : String(err)}`);
+        reportError("event_write", `aggregateLoop: ${err instanceof Error ? err.message : String(err)}`);
       } finally {
         // Always flush error state and prune resolved errors each cycle
         try {
