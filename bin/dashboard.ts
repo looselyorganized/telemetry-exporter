@@ -280,10 +280,12 @@ function dashboardHtml(): string {
     text-transform: uppercase;
     white-space: nowrap;
   }
-  .cat-sync_write { background: #3d2e00; color: #ffc850; }
-  .cat-project_resolution { background: #2e003d; color: #c850ff; }
+  .cat-event_write { background: #3d2e00; color: #ffc850; }
+  .cat-project_registration { background: #2e003d; color: #c850ff; }
+  .cat-facility_state { background: #3d0000; color: #ff5050; }
+  .cat-metrics_sync { background: #2e3d00; color: #c8ff50; }
+  .cat-telemetry_sync { background: #003d3d; color: #50c8ff; }
   .cat-supabase_transient { background: #003d2e; color: #50ffc8; }
-  .cat-facility_update { background: #3d0000; color: #ff5050; }
   .error-context {
     display: none;
     padding: 8px 12px;
