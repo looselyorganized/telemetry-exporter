@@ -67,10 +67,13 @@ export async function upsertProject(
   if (localName && localName !== contentSlug) {
     const names = localNames ?? [];
     if (!names.includes(localName)) {
-      await getSupabase()
+      const { error: mergeError } = await getSupabase()
         .from("projects")
         .update({ local_names: [...names, localName] })
         .eq("id", projId);
+      if (mergeError) {
+        console.warn(`  upsertProject: failed to merge localName (${mergeError.message})`);
+      }
     }
   }
 

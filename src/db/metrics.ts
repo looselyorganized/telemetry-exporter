@@ -67,18 +67,22 @@ export async function syncDailyMetrics(statsCache: StatsCache): Promise<number> 
 
   // Bulk insert new rows
   if (toInsert.length > 0) {
-    await getSupabase().from("daily_metrics").insert(toInsert);
+    const result = await getSupabase().from("daily_metrics").insert(toInsert);
+    checkResult(result, { operation: "syncDailyMetrics.insert", category: "metrics_sync" });
   }
 
   // Batch update existing rows
   const UPDATE_BATCH = 50;
   for (let i = 0; i < toUpdate.length; i += UPDATE_BATCH) {
     const batch = toUpdate.slice(i, i + UPDATE_BATCH);
-    await Promise.all(
+    const results = await Promise.all(
       batch.map((u) =>
         getSupabase().from("daily_metrics").update(u.data).eq("id", u.id)
       )
     );
+    for (const result of results) {
+      checkResult(result, { operation: "syncDailyMetrics.update", category: "metrics_sync" });
+    }
   }
 
   return rows.length;
@@ -211,11 +215,14 @@ export async function syncProjectDailyMetrics(
   const UPDATE_BATCH = 50;
   for (let i = 0; i < toUpdate.length; i += UPDATE_BATCH) {
     const batch = toUpdate.slice(i, i + UPDATE_BATCH);
-    await Promise.all(
+    const results = await Promise.all(
       batch.map((u) =>
         getSupabase().from("daily_metrics").update(u.data).eq("id", u.id)
       )
     );
+    for (const result of results) {
+      checkResult(result, { operation: "syncProjectDailyMetrics.update", category: "metrics_sync" });
+    }
   }
 
   return allRows.length;

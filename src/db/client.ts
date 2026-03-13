@@ -5,7 +5,7 @@
 
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
-let supabase: SupabaseClient;
+let supabase: SupabaseClient | null = null;
 
 export function initSupabase(url: string, serviceRoleKey: string): void {
   supabase = createClient(url, serviceRoleKey, {
@@ -14,6 +14,9 @@ export function initSupabase(url: string, serviceRoleKey: string): void {
 }
 
 export function getSupabase(): SupabaseClient {
+  if (!supabase) {
+    throw new Error("Supabase client not initialized. Call initSupabase() first.");
+  }
   return supabase;
 }
 
