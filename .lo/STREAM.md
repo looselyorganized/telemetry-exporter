@@ -4,6 +4,14 @@ type: stream
 
 <entry>
 date: 2026-03-12
+title: "Pipeline redesign: three resolvers become one, sync.ts dies"
+<description>
+The daemon, dashboard, and scanner each had their own way of figuring out which project a directory belonged to. They disagreed often enough to matter — renamed projects like lorf-bot showed up in one view and vanished from another. One resolver now serves all three, drawing from four sources in priority order so historical names don't get lost. The largest file in the codebase (sync.ts, 770 lines doing everything) was broken into 10 modules that each own one database table. Every failure now carries enough context to diagnose from the error tab alone. Events that arrived during a failed project registration used to disappear — they're now buffered and retried with backoff until the registration succeeds or gives up after 30 minutes.
+</description>
+</entry>
+
+<entry>
+date: 2026-03-12
 title: "Dashboard error view"
 <description>
 In-memory error aggregator deduplicates sync and daemon errors by category and normalized message, flushes to Supabase every cycle, and surfaces them in a new Errors tab with colored category badges and expandable context. 15 error sites instrumented across sync and daemon layers — errors auto-prune after 5 minutes of silence.
