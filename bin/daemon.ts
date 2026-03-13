@@ -183,7 +183,7 @@ async function drainBufferedEvents(projId: string, slug: string): Promise<void> 
       await updateProjectActivity(pid, count, lastActive);
     }
   } catch (err) {
-    console.error(`  Failed to drain buffered events for ${slug} [${projId}], will retry next cycle:`, err);
+    console.error(`  Failed to drain buffered events for ${slug} [${projId}], events dropped (scanProjectTokens will recover metrics):`, err);
   }
 }
 
