@@ -61,6 +61,7 @@ import { PROJECT_ROOT } from "../src/project/slug-resolver";
 import { reportError, clearErrors } from "../src/errors";
 import { flushErrors, pruneResolved, clearErrorsTable } from "../src/db/errors";
 import { PID_FILE, isProcessRunning } from "../src/cli-output";
+import { RegistrationRetryTracker } from "../src/registration-retry";
 import { readFileSync, writeFileSync, existsSync, unlinkSync } from "fs";
 import { join } from "path";
 
@@ -126,14 +127,8 @@ const tailer = new LogTailer();
 // Track projects we've already ensured exist in the DB (by projId)
 const knownProjects = new Set<string>();
 
-// Projects whose upsert failed — buffer their events until registration succeeds
-const failedRegistrations = new Set<string>();
-
-// Buffered events for failed-registration projects — drained after successful upsert
-const bufferedEvents = new Map<string, LogEntry[]>();
-
-// Maximum events to buffer per project while registration is pending
-const MAX_BUFFERED_EVENTS_PER_PROJECT = 1000;
+// Tracks failed registrations with exponential backoff, event buffers, and original meta
+const tracker = new RegistrationRetryTracker();
 
 // Single resolution authority for dirName → projId/slug mapping
 const resolver = new ProjectResolver();
@@ -210,12 +205,11 @@ async function ensureProjects(entries: LogEntry[]): Promise<void> {
     const ok = await upsertProject(projId, slug, localName, visibility, firstEntry?.parsedTimestamp ?? undefined);
     if (ok) {
       knownProjects.add(projId);
-      failedRegistrations.delete(projId);
       console.log(`  Project registered: ${slug} [${projId}]${slug !== localName ? ` (dir: ${localName})` : ""} (${visibility})`);
 
-      // Drain any buffered events that were skipped while registration was failing
-      const buffered = bufferedEvents.get(projId);
-      if (buffered && buffered.length > 0) {
+      // Drain any buffered events from prior failed registration attempts
+      const buffered = tracker.markSuccess(projId);
+      if (buffered.length > 0) {
         console.log(`  Draining ${buffered.length} buffered events for ${slug} [${projId}]`);
         try {
           const { insertedByProject } = await insertEvents(buffered);
@@ -224,14 +218,13 @@ async function ensureProjects(entries: LogEntry[]): Promise<void> {
             const lastActive = lastActiveByProject[pid] ?? new Date();
             await updateProjectActivity(pid, count, lastActive);
           }
-          bufferedEvents.delete(projId);
         } catch (err) {
           console.error(`  Failed to drain buffered events for ${slug} [${projId}], will retry next cycle:`, err);
         }
       }
     } else {
-      failedRegistrations.add(projId);
-      console.error(`  Project registration failed: ${slug} [${projId}] — buffering events, will retry next cycle`);
+      tracker.markFailed(projId, localName, slug);
+      console.error(`  Project registration failed: ${slug} [${projId}] — buffering events, will retry`);
     }
   }
 }
@@ -284,14 +277,12 @@ async function insertAndTrackActivity(entries: LogEntry[]): Promise<{
   const loEntries = filterAndMapLocal(entries);
   const toInsert: LogEntry[] = [];
   for (const entry of loEntries) {
-    if (failedRegistrations.has(entry.project)) {
-      const buf = bufferedEvents.get(entry.project) ?? [];
-      if (buf.length < MAX_BUFFERED_EVENTS_PER_PROJECT) {
-        buf.push(entry);
-        bufferedEvents.set(entry.project, buf);
-        if (buf.length === MAX_BUFFERED_EVENTS_PER_PROJECT) {
-          console.warn(`  Buffer full for ${entry.project} (limit: ${MAX_BUFFERED_EVENTS_PER_PROJECT}): further events will be dropped until registration succeeds`);
-        }
+    if (tracker.hasFailed(entry.project)) {
+      if (!tracker.bufferEvent(entry.project, entry)) {
+        reportError("project_registration", "event buffer full — dropping events", {
+          projId: entry.project,
+          limit: RegistrationRetryTracker.MAX_BUFFER,
+        });
       }
     } else {
       toInsert.push(entry);
