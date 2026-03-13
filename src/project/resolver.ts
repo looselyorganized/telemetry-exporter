@@ -121,7 +121,17 @@ export class ProjectResolver {
     const legacyMap = loadLegacyMapping();
     for (const [encodedName, projId] of legacyMap) {
       if (!newMap.has(encodedName)) {
-        newMap.set(encodedName, { projId, slug: encodedName });
+        // Reverse-lookup projId in already-resolved entries for a real slug.
+        // Avoids using encodedName as slug (breaks display) or split("-") on
+        // projId (breaks hyphenated names like telemetry-exporter).
+        let slug = encodedName;
+        for (const [, resolved] of newMap) {
+          if (resolved.projId === projId) {
+            slug = resolved.slug;
+            break;
+          }
+        }
+        newMap.set(encodedName, { projId, slug });
         fromLegacy++;
       }
     }
