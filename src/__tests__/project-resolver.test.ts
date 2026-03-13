@@ -1,5 +1,7 @@
 import { describe, test, expect, beforeEach } from "bun:test";
 import { mock } from "bun:test";
+import { existsSync } from "fs";
+import { join } from "path";
 
 // Mock Supabase for tests that call refresh()
 const mockProjectRows: any[] = [];
@@ -19,6 +21,11 @@ const { initSupabase, getSupabase } = await import("../db/client");
 initSupabase("http://fake", "fake-key");
 
 const { ProjectResolver } = await import("../project/resolver");
+const { PROJECT_ROOT } = await import("../project/slug-resolver");
+
+// Some tests depend on PROJECT_ROOT existing with real .lo/ projects on disk
+const hasProjectsOnDisk = existsSync(PROJECT_ROOT) &&
+  existsSync(join(PROJECT_ROOT, "telemetry-exporter"));
 
 describe("ProjectResolver", () => {
   let resolver: InstanceType<typeof ProjectResolver>;
@@ -95,7 +102,7 @@ describe("ProjectResolver", () => {
       }
     });
 
-    test("gracefully degrades when Supabase throws", async () => {
+    test.skipIf(!hasProjectsOnDisk)("gracefully degrades when Supabase throws", async () => {
       // Create a client whose .from().select() throws
       const throwingClient = {
         from: () => ({

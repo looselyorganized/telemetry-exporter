@@ -33,11 +33,15 @@ export async function syncDailyMetrics(statsCache: StatsCache): Promise<number> 
 
   // Batch fetch all existing global daily_metrics rows
   const dates = rows.map((r) => r.date);
-  const { data: existingRows } = await getSupabase()
+  const existingResult = await getSupabase()
     .from("daily_metrics")
     .select("id, date")
     .in("date", dates)
     .is("project_id", null);
+  if (!checkResult(existingResult, { operation: "syncDailyMetrics.selectExisting", category: "metrics_sync" })) {
+    return 0;
+  }
+  const { data: existingRows } = existingResult;
 
   const existingByDate = new Map<string, number>();
   for (const row of existingRows ?? []) {
@@ -139,11 +143,15 @@ export async function syncProjectDailyMetrics(
   const FETCH_BATCH = 500;
   for (let i = 0; i < projects.length; i += FETCH_BATCH) {
     const projectBatch = projects.slice(i, i + FETCH_BATCH);
-    const { data: existingRows } = await getSupabase()
+    const existingResult = await getSupabase()
       .from("daily_metrics")
       .select("id, date, project_id")
       .in("project_id", projectBatch)
       .in("date", dates);
+    if (!checkResult(existingResult, { operation: "syncProjectDailyMetrics.selectExisting", category: "metrics_sync" })) {
+      continue;
+    }
+    const { data: existingRows } = existingResult;
 
     for (const row of existingRows ?? []) {
       existingByKey.set(makeKey(row.project_id, row.date), { id: row.id });
@@ -234,15 +242,14 @@ export async function syncProjectDailyMetrics(
  * Global rows (project IS NULL) are left untouched.
  */
 export async function deleteProjectDailyMetrics(): Promise<number> {
-  const { count, error } = await getSupabase()
+  const result = await getSupabase()
     .from("daily_metrics")
     .delete({ count: "exact" })
     .not("project_id", "is", null);
 
-  if (error) {
-    checkResult({ error }, { operation: "deleteProjectDailyMetrics", category: "metrics_sync" });
+  if (!checkResult(result, { operation: "deleteProjectDailyMetrics", category: "metrics_sync" })) {
     return 0;
   }
 
-  return count ?? 0;
+  return result.count ?? 0;
 }

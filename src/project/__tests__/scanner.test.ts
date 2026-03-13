@@ -255,7 +255,12 @@ describe("resolveProjIdForDir with resolver", () => {
     } as any;
   }
 
-  test("resolves via plain name when resolver is provided", () => {
+  // This test needs PROJECT_ROOT to exist with telemetry-exporter on disk
+  // because resolveProjectName() calls readProjectDirs() to decode the encoded path
+  const canResolveOnDisk = existsSync(PROJECT_ROOT) &&
+    existsSync(join(PROJECT_ROOT, "telemetry-exporter"));
+
+  test.skipIf(!canResolveOnDisk)("resolves via plain name when resolver is provided", () => {
     const resolver = fakeResolver({
       "telemetry-exporter": { projId: "proj_abc", slug: "telemetry-exporter" },
     });
