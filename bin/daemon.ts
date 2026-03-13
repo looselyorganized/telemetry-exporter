@@ -49,7 +49,7 @@ import {
   syncProjectDailyMetrics,
   deleteProjectDailyMetrics,
 } from "../src/db/metrics";
-import { batchUpsertProjectTelemetry } from "../src/db/telemetry";
+import { batchUpsertProjectTelemetry, verifyProjectTelemetry } from "../src/db/telemetry";
 import { pushAgentState } from "../src/db/agent-state";
 import { ProcessWatcher } from "../src/process/watcher";
 import {
@@ -170,6 +170,10 @@ let allSeenEntries: LogEntry[] = [];
 
 // Cache model stats — only re-read from disk when new events arrive
 let cachedModelStats: ReturnType<typeof readModelStats> = [];
+
+// Last written projIds for periodic telemetry verification
+let lastWrittenProjIds: string[] = [];
+let lastWrittenUpdates: ProjectTelemetryUpdate[] = [];
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -493,7 +497,10 @@ async function syncFacilityStatus(
   };
 
   await updateFacilityStatus(update);
-  await batchUpsertProjectTelemetry(buildProjectTelemetryUpdates(agentsByProject));
+  const telemetryUpdates = buildProjectTelemetryUpdates(agentsByProject);
+  const { writtenProjIds } = await batchUpsertProjectTelemetry(telemetryUpdates);
+  lastWrittenProjIds = writtenProjIds;
+  lastWrittenUpdates = telemetryUpdates;
 
   return facility;
 }
@@ -505,7 +512,10 @@ async function syncAggregateMetrics(
   modelStats: ReturnType<typeof readModelStats>
 ): Promise<void> {
   await updateFacilityMetrics(buildFacilityMetrics(statsCache, modelStats));
-  await batchUpsertProjectTelemetry(buildProjectTelemetryUpdates(), { skipAgentFields: true });
+  const telemetryUpdates = buildProjectTelemetryUpdates();
+  const { writtenProjIds } = await batchUpsertProjectTelemetry(telemetryUpdates, { skipAgentFields: true });
+  lastWrittenProjIds = writtenProjIds;
+  lastWrittenUpdates = telemetryUpdates;
 }
 
 // ─── Periodic daily metrics sync ───────────────────────────────────────────
@@ -798,6 +808,9 @@ async function main(): Promise<void> {
           const statsCache = readStatsCache();
           await refreshResolver();
           await retryFailedRegistrations(cycleCount);
+          if (lastWrittenProjIds.length > 0) {
+            await verifyProjectTelemetry(lastWrittenUpdates, lastWrittenProjIds);
+          }
           await refreshProjectCachesFromDisk();
           const settled = await Promise.allSettled([
             maybeSyncDailyMetrics(statsCache),

@@ -24,8 +24,8 @@ interface ProjectTelemetryRow {
 export async function batchUpsertProjectTelemetry(
   updates: ProjectTelemetryUpdate[],
   options: { skipAgentFields?: boolean } = {}
-): Promise<void> {
-  if (updates.length === 0) return;
+): Promise<{ writtenProjIds: string[] }> {
+  if (updates.length === 0) return { writtenProjIds: [] };
 
   const now = new Date().toISOString();
 
@@ -67,7 +67,7 @@ export async function batchUpsertProjectTelemetry(
       { error },
       { operation: "batchUpsertProjectTelemetry.batch", category: "telemetry_sync" }
     );
-    let succeeded = 0;
+    const writtenProjIds: string[] = [];
     for (const update of updates) {
       const rowResult = await getSupabase()
         .from("project_telemetry")
@@ -80,23 +80,34 @@ export async function batchUpsertProjectTelemetry(
           entity: { projId: update.projId },
         });
       } else {
-        succeeded++;
+        writtenProjIds.push(update.projId);
       }
     }
-    console.log(`  project_telemetry: ${succeeded}/${updates.length} rows updated (batch fallback)`);
+    console.log(`  project_telemetry: ${writtenProjIds.length}/${updates.length} rows updated (batch fallback)`);
+    return { writtenProjIds };
   }
 
-  // Verify: read back and compare tokens_lifetime
-  await verifyProjectTelemetry(updates);
+  return { writtenProjIds: updates.map((u) => u.projId) };
 }
 
 /**
  * Read back project_telemetry rows and log any mismatches against expected values.
+ * When projIds is provided, only fetches those rows (efficient for periodic checks).
+ * When omitted, fetches all rows (used during backfill verification).
  */
-async function verifyProjectTelemetry(updates: ProjectTelemetryUpdate[]): Promise<void> {
-  const { data: rows } = await getSupabase()
+export async function verifyProjectTelemetry(
+  updates: ProjectTelemetryUpdate[],
+  projIds?: string[]
+): Promise<void> {
+  let query = getSupabase()
     .from("project_telemetry")
     .select("id, tokens_lifetime");
+
+  if (projIds && projIds.length > 0) {
+    query = query.in("id", projIds);
+  }
+
+  const { data: rows } = await query;
 
   if (!rows) return;
 
@@ -114,6 +125,7 @@ async function verifyProjectTelemetry(updates: ProjectTelemetryUpdate[]): Promis
   }
 
   if (mismatches === 0) {
-    console.log(`  project_telemetry: verified ${updates.length} rows match DB`);
+    const scope = projIds ? `${projIds.length} filtered` : `${updates.length}`;
+    console.log(`  project_telemetry: verified ${scope} rows match DB`);
   }
 }
