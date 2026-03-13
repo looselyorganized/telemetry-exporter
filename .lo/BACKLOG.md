@@ -19,3 +19,9 @@ updated: 2026-03-12
 
 - [ ] t002 Add build script
   Add `build` script to package.json so GH CI can run build checks via the reusable workflow.
+
+- [ ] t003 Update dashboard error category CSS classes
+  Dashboard CSS selectors (`.cat-sync_write`, `.cat-project_resolution`, `.cat-facility_update`) use old error category names from before the Phase 1 db/ module split. They silently fail to style error badges for the new categories. Update to match current `ErrorCategory` values.
+
+- [ ] t004 Fix legacy resolver entries using encoded path as slug
+  `ProjectResolver` stores legacy `.project-mapping.json` entries with `slug: encodedName` (e.g. `-Users-bigviking-Documents-github-projects-lo-nexus`). Not a real slug. Cosmetic — legacy slugs are never displayed — but the type system allows callers to trust `resolved.slug` as display-friendly.
