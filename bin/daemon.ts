@@ -35,7 +35,6 @@ import {
   type FacilityUpdate,
   type FacilityMetricsUpdate,
   type ProjectTelemetryUpdate,
-  type ProjectEventAggregates,
 } from "../src/db/types";
 import { upsertProject, updateProjectActivity } from "../src/db/projects";
 import { insertEvents, pruneOldEvents } from "../src/db/events";

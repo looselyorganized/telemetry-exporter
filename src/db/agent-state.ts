@@ -14,9 +14,9 @@ import type { ProcessDiff } from "../process/watcher";
 export async function pushAgentState(diff: ProcessDiff): Promise<void> {
   const now = new Date().toISOString();
 
-  // Per-project telemetry updates (agent counts)
+  // Per-project telemetry updates (agent counts) + last_active for active agents
   for (const [projId, counts] of diff.byProject) {
-    const result = await getSupabase()
+    const telemetryResult = await getSupabase()
       .from("project_telemetry")
       .update({
         active_agents: counts.active,
@@ -25,11 +25,24 @@ export async function pushAgentState(diff: ProcessDiff): Promise<void> {
       })
       .eq("id", projId);
 
-    checkResult(result, {
+    checkResult(telemetryResult, {
       operation: "pushAgentState.projectTelemetry",
       category: "telemetry_sync",
       entity: { projId },
     });
+
+    if (counts.active > 0) {
+      const activeResult = await getSupabase()
+        .from("projects")
+        .update({ last_active: now })
+        .eq("id", projId);
+
+      checkResult(activeResult, {
+        operation: "pushAgentState.lastActive",
+        category: "project_registration",
+        entity: { projId },
+      });
+    }
   }
 
   // Facility agent fields (status is owned by lo-open/lo-close)
@@ -46,20 +59,4 @@ export async function pushAgentState(diff: ProcessDiff): Promise<void> {
     operation: "pushAgentState.facility",
     category: "facility_state",
   });
-
-  // Update last_active for projects with active agents
-  for (const [projId, counts] of diff.byProject) {
-    if (counts.active > 0) {
-      const result = await getSupabase()
-        .from("projects")
-        .update({ last_active: now })
-        .eq("id", projId);
-
-      checkResult(result, {
-        operation: "pushAgentState.lastActive",
-        category: "project_registration",
-        entity: { projId },
-      });
-    }
-  }
 }
