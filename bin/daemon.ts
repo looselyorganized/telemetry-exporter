@@ -229,6 +229,55 @@ async function ensureProjects(entries: LogEntry[]): Promise<void> {
   }
 }
 
+/**
+ * Periodic retry: re-attempt upsertProject for projects in the tracker.
+ * Called every 5 minutes (60 cycles). Uses stored meta for dirName/slug.
+ */
+async function retryFailedRegistrations(currentCycle: number): Promise<void> {
+  const readyToRetry = tracker.getReadyToRetry(currentCycle);
+  if (readyToRetry.length === 0 && tracker.getAbandonedToReport().length === 0) return;
+
+  if (readyToRetry.length > 0) {
+    console.log(`  Retrying ${readyToRetry.length} failed registrations...`);
+  }
+
+  for (const projId of readyToRetry) {
+    const meta = tracker.getMeta(projId);
+    if (!meta) continue;
+
+    const visibility = getVisibility(meta.dirName);
+    const ok = await upsertProject(projId, meta.slug, meta.dirName, visibility);
+
+    if (ok) {
+      knownProjects.add(projId);
+      console.log(`  Retry succeeded: ${meta.slug} [${projId}]`);
+
+      const buffered = tracker.markSuccess(projId);
+      if (buffered.length > 0) {
+        console.log(`  Draining ${buffered.length} buffered events for ${meta.slug} [${projId}]`);
+        const { insertedByProject } = await insertEvents(buffered);
+        const lastActiveByProject = computeLastActive(buffered);
+        for (const [pid, count] of Object.entries(insertedByProject)) {
+          const lastActive = lastActiveByProject[pid] ?? new Date();
+          await updateProjectActivity(pid, count, lastActive);
+        }
+      }
+    } else {
+      tracker.recordAttempt(projId, currentCycle);
+      console.warn(`  Retry failed: ${meta.slug} [${projId}]`);
+    }
+  }
+
+  // Report abandoned projects (6+ failures) — these stop retrying
+  for (const abandoned of tracker.getAbandonedToReport()) {
+    reportError("project_registration", `registration abandoned after ${abandoned.attempts} attempts`, {
+      projId: abandoned.projId,
+      dirName: abandoned.dirName,
+      slug: abandoned.slug,
+    });
+  }
+}
+
 // ─── Compute facility-wide totals from per-project caches ──────────────────
 
 function computeTodayTokens(): number {
@@ -748,6 +797,7 @@ async function main(): Promise<void> {
         if (cycleCount % 60 === 0 && cycleCount > 0) {
           const statsCache = readStatsCache();
           await refreshResolver();
+          await retryFailedRegistrations(cycleCount);
           await refreshProjectCachesFromDisk();
           const settled = await Promise.allSettled([
             maybeSyncDailyMetrics(statsCache),
