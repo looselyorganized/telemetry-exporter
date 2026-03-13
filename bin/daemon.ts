@@ -259,11 +259,15 @@ async function retryFailedRegistrations(currentCycle: number): Promise<void> {
       const buffered = tracker.markSuccess(projId);
       if (buffered.length > 0) {
         console.log(`  Draining ${buffered.length} buffered events for ${meta.slug} [${projId}]`);
-        const { insertedByProject } = await insertEvents(buffered);
-        const lastActiveByProject = computeLastActive(buffered);
-        for (const [pid, count] of Object.entries(insertedByProject)) {
-          const lastActive = lastActiveByProject[pid] ?? new Date();
-          await updateProjectActivity(pid, count, lastActive);
+        try {
+          const { insertedByProject } = await insertEvents(buffered);
+          const lastActiveByProject = computeLastActive(buffered);
+          for (const [pid, count] of Object.entries(insertedByProject)) {
+            const lastActive = lastActiveByProject[pid] ?? new Date();
+            await updateProjectActivity(pid, count, lastActive);
+          }
+        } catch (err) {
+          console.error(`  Failed to drain buffered events for ${meta.slug} [${projId}], will retry next cycle:`, err);
         }
       }
     } else {

@@ -137,6 +137,12 @@ describe("RegistrationRetryTracker", () => {
     });
   });
 
+  test("getAbandonedToReport returns empty before max attempts", () => {
+    tracker.markFailed("proj_abc", "my-project", "my-project");
+    for (let i = 0; i < 5; i++) tracker.recordAttempt("proj_abc", i * 10);
+    expect(tracker.getAbandonedToReport()).toHaveLength(0);
+  });
+
   test("abandoned project is excluded from getReadyToRetry", () => {
     tracker.markFailed("proj_abc", "my-project", "my-project");
     for (let i = 0; i < 6; i++) tracker.recordAttempt("proj_abc", i * 10);
