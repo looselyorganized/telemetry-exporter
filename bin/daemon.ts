@@ -57,13 +57,11 @@ import {
   getVisibility,
 } from "../src/visibility-cache";
 import { ProjectResolver } from "../src/project/resolver";
-import { PROJECT_ROOT } from "../src/project/slug-resolver";
 import { reportError, clearErrors } from "../src/errors";
 import { flushErrors, pruneResolved, clearErrorsTable } from "../src/db/errors";
 import { PID_FILE, isProcessRunning } from "../src/cli-output";
 import { RegistrationRetryTracker } from "../src/registration-retry";
 import { readFileSync, writeFileSync, existsSync, unlinkSync } from "fs";
-import { join } from "path";
 
 // ─── Config ────────────────────────────────────────────────────────────────
 
@@ -141,19 +139,8 @@ async function refreshResolver(): Promise<void> {
   );
 }
 
-/** Map a directory name (from events.log) to its content_slug, or null if not a LO project */
-function toSlug(dirName: string): string | null {
-  return resolver.resolve(dirName)?.slug ?? null;
-}
-
-/** Map a directory name (from events.log) to its project id, or null if not a LO project */
 function toProjId(dirName: string): string | null {
   return resolver.resolve(dirName)?.projId ?? null;
-}
-
-/** Filter entries to only LO projects and map project fields to projIds */
-function filterAndMapLocal(entries: LogEntry[]): LogEntry[] {
-  return filterAndMapEntries(entries, toProjId);
 }
 
 // Cache project token totals for facility status updates
@@ -182,6 +169,25 @@ function todayDateString(): string {
   return new Date().toISOString().split("T")[0];
 }
 
+// ─── Drain buffered events after successful registration ─────────────────
+
+async function drainBufferedEvents(projId: string, slug: string): Promise<void> {
+  const buffered = tracker.markSuccess(projId);
+  if (buffered.length === 0) return;
+
+  console.log(`  Draining ${buffered.length} buffered events for ${slug} [${projId}]`);
+  try {
+    const { insertedByProject } = await insertEvents(buffered);
+    const lastActiveByProject = computeLastActive(buffered);
+    for (const [pid, count] of Object.entries(insertedByProject)) {
+      const lastActive = lastActiveByProject[pid] ?? new Date();
+      await updateProjectActivity(pid, count, lastActive);
+    }
+  } catch (err) {
+    console.error(`  Failed to drain buffered events for ${slug} [${projId}], will retry next cycle:`, err);
+  }
+}
+
 // ─── Ensure projects exist ─────────────────────────────────────────────────
 
 async function ensureProjects(entries: LogEntry[]): Promise<void> {
@@ -191,13 +197,12 @@ async function ensureProjects(entries: LogEntry[]): Promise<void> {
 
   for (const entry of entries) {
     if (!entry.project) continue;
-    const projId = toProjId(entry.project);
-    const slug = toSlug(entry.project);
-    if (!projId || !slug) continue;
-    if (!knownProjects.has(projId)) {
-      newProjIds.add(projId);
-      projIdToLocal.set(projId, entry.project);
-      projIdToSlug.set(projId, slug);
+    const resolved = resolver.resolve(entry.project);
+    if (!resolved) continue;
+    if (!knownProjects.has(resolved.projId)) {
+      newProjIds.add(resolved.projId);
+      projIdToLocal.set(resolved.projId, entry.project);
+      projIdToSlug.set(resolved.projId, resolved.slug);
     }
   }
 
@@ -210,22 +215,7 @@ async function ensureProjects(entries: LogEntry[]): Promise<void> {
     if (ok) {
       knownProjects.add(projId);
       console.log(`  Project registered: ${slug} [${projId}]${slug !== localName ? ` (dir: ${localName})` : ""} (${visibility})`);
-
-      // Drain any buffered events from prior failed registration attempts
-      const buffered = tracker.markSuccess(projId);
-      if (buffered.length > 0) {
-        console.log(`  Draining ${buffered.length} buffered events for ${slug} [${projId}]`);
-        try {
-          const { insertedByProject } = await insertEvents(buffered);
-          const lastActiveByProject = computeLastActive(buffered);
-          for (const [pid, count] of Object.entries(insertedByProject)) {
-            const lastActive = lastActiveByProject[pid] ?? new Date();
-            await updateProjectActivity(pid, count, lastActive);
-          }
-        } catch (err) {
-          console.error(`  Failed to drain buffered events for ${slug} [${projId}], will retry next cycle:`, err);
-        }
-      }
+      await drainBufferedEvents(projId, slug);
     } else {
       tracker.markFailed(projId, localName, slug);
       console.error(`  Project registration failed: ${slug} [${projId}] — buffering events, will retry`);
@@ -255,21 +245,7 @@ async function retryFailedRegistrations(currentCycle: number): Promise<void> {
     if (ok) {
       knownProjects.add(projId);
       console.log(`  Retry succeeded: ${meta.slug} [${projId}]`);
-
-      const buffered = tracker.markSuccess(projId);
-      if (buffered.length > 0) {
-        console.log(`  Draining ${buffered.length} buffered events for ${meta.slug} [${projId}]`);
-        try {
-          const { insertedByProject } = await insertEvents(buffered);
-          const lastActiveByProject = computeLastActive(buffered);
-          for (const [pid, count] of Object.entries(insertedByProject)) {
-            const lastActive = lastActiveByProject[pid] ?? new Date();
-            await updateProjectActivity(pid, count, lastActive);
-          }
-        } catch (err) {
-          console.error(`  Failed to drain buffered events for ${meta.slug} [${projId}], will retry next cycle:`, err);
-        }
-      }
+      await drainBufferedEvents(projId, meta.slug);
     } else {
       tracker.recordAttempt(projId, currentCycle);
       console.warn(`  Retry failed: ${meta.slug} [${projId}]`);
@@ -300,11 +276,6 @@ function sumLifetimeField(field: keyof LifetimeCounters): number {
   return total;
 }
 
-/** Aggregate per-project events using the ProjectResolver. */
-function aggregateProjectEventsLocal(entries: LogEntry[]): ProjectEventAggregates {
-  return aggregateProjectEvents(entries, toProjId);
-}
-
 // ─── Shared helpers ─────────────────────────────────────────────────────────
 
 /** Build ProjectTelemetryUpdate[] from cached data. */
@@ -331,7 +302,7 @@ async function insertAndTrackActivity(entries: LogEntry[]): Promise<{
   inserted: number;
   errors: number;
 }> {
-  const loEntries = filterAndMapLocal(entries);
+  const loEntries = filterAndMapEntries(entries, toProjId);
   const toInsert: LogEntry[] = [];
   for (const entry of loEntries) {
     if (tracker.hasFailed(entry.project)) {
@@ -397,7 +368,7 @@ async function backfill(): Promise<void> {
   console.log("  Scanning JSONL files for per-project tokens...");
   const projectTokenMap = scanProjectTokens(resolver);
   cachedTokensByProject = computeTokensByProject(projectTokenMap);
-  const projectEventAggregates = aggregateProjectEventsLocal(allEntries);
+  const projectEventAggregates = aggregateProjectEvents(allEntries, toProjId);
   const projectSynced = await syncProjectDailyMetrics(projectTokenMap, projectEventAggregates);
   console.log(`  Synced ${projectSynced} per-project daily metric rows`);
 
@@ -550,7 +521,7 @@ async function maybeSyncProjectDailyMetrics(): Promise<void> {
   try {
     const projectTokenMap = scanProjectTokens(resolver);
     cachedTokensByProject = computeTokensByProject(projectTokenMap);
-    const projectEventAggregates = aggregateProjectEventsLocal(allSeenEntries);
+    const projectEventAggregates = aggregateProjectEvents(allSeenEntries, toProjId);
     await syncProjectDailyMetrics(projectTokenMap, projectEventAggregates);
 
     await refreshLifetimeCountersFromDb();
@@ -694,7 +665,7 @@ async function gapBackfill(allEntries: LogEntry[]): Promise<void> {
   // Scan JSONL files for per-project tokens (full scan, idempotent)
   const projectTokenMap = scanProjectTokens(resolver);
   cachedTokensByProject = computeTokensByProject(projectTokenMap);
-  const projectEventAggregates = aggregateProjectEventsLocal(allSeenEntries);
+  const projectEventAggregates = aggregateProjectEvents(allSeenEntries, toProjId);
   const projectSynced = await syncProjectDailyMetrics(
     projectTokenMap,
     projectEventAggregates
