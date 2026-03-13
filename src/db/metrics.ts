@@ -101,14 +101,36 @@ interface DailyKeyData {
   events?: { sessions: number; messages: number; toolCalls: number; agentSpawns: number; teamMessages: number };
 }
 
+interface ProjectDailyMetricsInsert {
+  date: string;
+  project_id: string;
+  tokens: Record<string, number> | null;
+  sessions: number;
+  messages: number;
+  tool_calls: number;
+  agent_spawns: number;
+  team_messages: number;
+}
+
+interface ProjectDailyMetricsPartial {
+  tokens?: Record<string, number>;
+  sessions?: number;
+  messages?: number;
+  tool_calls?: number;
+  agent_spawns?: number;
+  team_messages?: number;
+}
+
+function makeKey(project: string, date: string): string {
+  return `${project}\0${date}`;
+}
+
 export async function syncProjectDailyMetrics(
   tokenMap: ProjectTokenMap,
   eventAggregates?: ProjectEventAggregates
 ): Promise<number> {
   // Build a unified set of (project, date) keys from both sources
   const keys = new Map<string, DailyKeyData>();
-
-  const makeKey = (project: string, date: string) => `${project}\0${date}`;
 
   for (const [project, dateMap] of tokenMap) {
     for (const [date, modelTokens] of dateMap) {
@@ -139,7 +161,7 @@ export async function syncProjectDailyMetrics(
   const dates = [...new Set(allRows.map((r) => r.date))];
 
   // Fetch in chunks to stay within Supabase query limits
-  const existingByKey = new Map<string, { id: number }>();
+  const existingIdByKey = new Map<string, number>();
   const FETCH_BATCH = 500;
   for (let i = 0; i < projects.length; i += FETCH_BATCH) {
     const projectBatch = projects.slice(i, i + FETCH_BATCH);
@@ -154,37 +176,17 @@ export async function syncProjectDailyMetrics(
     const { data: existingRows } = existingResult;
 
     for (const row of existingRows ?? []) {
-      existingByKey.set(makeKey(row.project_id, row.date), { id: row.id });
+      existingIdByKey.set(makeKey(row.project_id, row.date), row.id);
     }
   }
 
   // Split into updates vs inserts
-  interface ProjectDailyMetricsInsert {
-    date: string;
-    project_id: string;
-    tokens: Record<string, number> | null;
-    sessions: number;
-    messages: number;
-    tool_calls: number;
-    agent_spawns: number;
-    team_messages: number;
-  }
-
-  interface ProjectDailyMetricsPartial {
-    tokens?: Record<string, number>;
-    sessions?: number;
-    messages?: number;
-    tool_calls?: number;
-    agent_spawns?: number;
-    team_messages?: number;
-  }
-
   const toInsert: ProjectDailyMetricsInsert[] = [];
   const toUpdate: Array<{ id: number; data: ProjectDailyMetricsPartial }> = [];
 
   for (const row of allRows) {
-    const existing = existingByKey.get(makeKey(row.project, row.date));
-    if (existing) {
+    const existingId = existingIdByKey.get(makeKey(row.project, row.date));
+    if (existingId !== undefined) {
       const updates: ProjectDailyMetricsPartial = {};
       if (row.tokens) updates.tokens = row.tokens;
       if (row.events) {
@@ -195,7 +197,7 @@ export async function syncProjectDailyMetrics(
         updates.team_messages = row.events.teamMessages;
       }
       if (Object.keys(updates).length > 0) {
-        toUpdate.push({ id: existing.id, data: updates });
+        toUpdate.push({ id: existingId, data: updates });
       }
     } else {
       toInsert.push({

@@ -24,8 +24,8 @@ export async function upsertProject(
       {
         id: projId,
         content_slug: contentSlug,
-        visibility: visibility === "public" ? "public" : "private",
-        state: visibility === "public" ? "public" : "private",
+        visibility,
+        state: visibility,
         status: "explore",
         first_seen: now.toISOString(),
         last_active: now.toISOString(),
@@ -45,8 +45,8 @@ export async function upsertProject(
       .from("projects")
       .update({
         content_slug: contentSlug,
-        visibility: visibility === "public" ? "public" : "private",
-        state: visibility === "public" ? "public" : "private",
+        visibility,
+        state: visibility,
         last_active: now.toISOString(),
       })
       .eq("id", projId)

@@ -4,16 +4,13 @@
 
 import type { ModelStats } from "../parsers";
 
-/** Token breakdown per model, keyed by model name. */
-export type ModelTokenBreakdown = Record<string, Omit<ModelStats, "model">>;
-
 /** Aggregate metrics for the facility status row. */
 export interface FacilityMetrics {
   tokensLifetime: number;
   tokensToday: number;
   sessionsLifetime: number;
   messagesLifetime: number;
-  modelStats: ModelTokenBreakdown;
+  modelStats: Record<string, Omit<ModelStats, "model">>;
   hourDistribution: Record<string, number>;
   firstSessionDate: string | null;
 }

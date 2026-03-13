@@ -33,6 +33,14 @@ export async function insertEvents(entries: LogEntry[]): Promise<InsertEventsRes
   const insertedByProject: Record<string, number> = {};
   const BATCH_SIZE = 500;
 
+  function countInserted(projectRows: typeof rows): void {
+    for (const row of projectRows) {
+      if (row.project_id) {
+        insertedByProject[row.project_id] = (insertedByProject[row.project_id] ?? 0) + 1;
+      }
+    }
+  }
+
   for (let i = 0; i < rows.length; i += BATCH_SIZE) {
     const batch = rows.slice(i, i + BATCH_SIZE);
     const { error, status } = await withRetry(
@@ -44,23 +52,17 @@ export async function insertEvents(entries: LogEntry[]): Promise<InsertEventsRes
 
     if (error) {
       const errorStatus = status ?? 0;
+      const ctx = { operation: "insertEvents.batch", category: "event_write" as const, entity: { batchStart: i, batchEnd: i + batch.length } };
+
       if (errorStatus >= 500) {
-        // Server error — don't amplify with per-row retries, let next cycle handle it
         console.error(`  events: batch ${i}-${i + batch.length} failed (HTTP ${errorStatus}: ${error.message}), skipping — will retry next cycle`);
-        checkResult(
-          { error, status: errorStatus },
-          { operation: "insertEvents.batch", category: "event_write", entity: { batchStart: i, batchEnd: i + batch.length } }
-        );
+        checkResult({ error, status: errorStatus }, ctx);
         errors += batch.length;
         continue;
       }
 
-      // Non-5xx (FK violation, constraint error, etc.) — try per-row recovery
       console.error(`  events: batch ${i}-${i + batch.length} failed (${error.message}), falling back to per-row`);
-      checkResult(
-        { error, status: errorStatus },
-        { operation: "insertEvents.batch", category: "event_write", entity: { batchStart: i, batchEnd: i + batch.length } }
-      );
+      checkResult({ error, status: errorStatus }, ctx);
       let recovered = 0;
       for (const row of batch) {
         const { error: rowError } = await getSupabase()
@@ -71,9 +73,7 @@ export async function insertEvents(entries: LogEntry[]): Promise<InsertEventsRes
         } else {
           inserted++;
           recovered++;
-          if (row.project_id) {
-            insertedByProject[row.project_id] = (insertedByProject[row.project_id] ?? 0) + 1;
-          }
+          countInserted([row]);
         }
       }
       console.log(`  events: ${recovered}/${batch.length} recovered (batch fallback)`);
@@ -81,11 +81,7 @@ export async function insertEvents(entries: LogEntry[]): Promise<InsertEventsRes
     }
 
     inserted += batch.length;
-    for (const row of batch) {
-      if (row.project_id) {
-        insertedByProject[row.project_id] = (insertedByProject[row.project_id] ?? 0) + 1;
-      }
-    }
+    countInserted(batch);
   }
 
   return { inserted, errors, insertedByProject };
