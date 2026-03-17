@@ -1,14 +1,14 @@
 /**
  * Single resolution authority for dirName → projId mapping.
  *
- * Resolution sources (in priority order):
- * 1. lo.yml — declared identity file in project root (preferred)
- * 2. Supabase — slug → proj_ ID lookup (fallback for projects without lo.yml)
- * 3. Name cache — persisted dirName → projId mappings that survive renames
- * 4. Org-root hardcode — ["looselyorganized", "lo"] → proj_org-root
+ * Only projects with a lo.yml file are resolved and exported.
+ * Resolution sources:
+ * 1. lo.yml — declared identity file in project root (only path for projects)
+ * 2. Name cache — persisted dirName → projId mappings that survive renames
+ * 3. Org-root hardcode — ["looselyorganized", "lo"] → proj_org-root
  *
  * resolve() is synchronous — the 250ms watcher loop calls it and must never await.
- * refresh() is async — rebuilds maps from disk + Supabase. Called at startup
+ * refresh() is async — rebuilds maps from disk. Called at startup
  * and periodically (every 60 cycles / 5 minutes).
  */
 
@@ -136,31 +136,27 @@ export class ProjectResolver {
   }
 
   /**
-   * Async. Rebuilds maps from disk + Supabase + name cache.
+   * Async. Rebuilds maps from lo.yml + name cache.
    *
-   * 1. lo.yml — read proj_ ID directly from each project dir (no network needed)
-   *    Uses git remote slug if available, falls back to dirName.
-   * 2. Supabase fallback — for projects without lo.yml, use git remote → slug → Supabase
-   * 3. Name cache — load persisted old dirName → projId mappings (rename resilience)
-   * 4. Org-root hardcode
-   * 5. Persist all current mappings to name cache, prune stale entries
+   * Only projects with a lo.yml file are exported. Resolution sources:
+   * 1. lo.yml — read proj_ ID directly from each project dir
+   * 2. Name cache — persisted old dirName → projId mappings (rename resilience)
+   * 3. Org-root hardcode — ["looselyorganized", "lo"] → proj_org-root
+   * 4. Persist all current mappings to name cache, prune stale entries
    */
-  async refresh(supabase: SupabaseClient): Promise<void> {
+  async refresh(_supabase: SupabaseClient): Promise<void> {
     const newMap = new Map<string, ResolvedProject>();
     let fromLoYml = 0;
     let fromDisk = 0;
-    let fromSupabase = 0;
+    const fromSupabase = 0;
     let fromNameCache = 0;
 
-    // Track which dirs were resolved via lo.yml (skip them in Supabase fallback)
-    const resolvedDirs = new Set<string>();
-
-    // Build slug map first — needed for lo.yml slug derivation and Supabase fallback
+    // Build slug map for git remote slug derivation
     clearSlugCache();
     clearProjIdCache();
     const slugMap = buildSlugMap();
 
-    // 1. lo.yml — primary resolution path
+    // 1. lo.yml — only resolution path for projects
     try {
       const dirs = readdirSync(PROJECT_ROOT).filter((d) =>
         isDirectory(join(PROJECT_ROOT, d))
@@ -169,50 +165,13 @@ export class ProjectResolver {
       for (const dirName of dirs) {
         const projId = readLoYml(join(PROJECT_ROOT, dirName));
         if (projId) {
-          // Use git remote slug if available, otherwise directory name
           const slug = slugMap.get(dirName) ?? dirName;
           newMap.set(dirName, { projId, slug });
-          resolvedDirs.add(dirName);
           fromLoYml++;
         }
       }
     } catch {
       // PROJECT_ROOT doesn't exist or isn't readable
-    }
-
-    // 2. Supabase fallback — for dirs without lo.yml
-    const slugToId = new Map<string, string>();
-    try {
-      const { data: projects } = await supabase
-        .from("projects")
-        .select("id, slug");
-
-      for (const proj of projects ?? []) {
-        const projId = proj.id as string;
-        const slug = proj.slug as string;
-        if (projId && slug) {
-          slugToId.set(slug, projId);
-        }
-      }
-    } catch {
-      // Supabase unreachable — continue with what we have
-    }
-
-    for (const [dirName, slug] of slugMap) {
-      if (resolvedDirs.has(dirName)) continue; // already resolved via lo.yml
-      const projId = slugToId.get(slug);
-      if (projId) {
-        newMap.set(dirName, { projId, slug });
-        fromDisk++;
-      }
-    }
-
-    // Also register by slug for Supabase-only entries (no local dir)
-    for (const [slug, projId] of slugToId) {
-      if (!newMap.has(slug)) {
-        newMap.set(slug, { projId, slug });
-        fromSupabase++;
-      }
     }
 
     // Snapshot live-resolved keys before loading cache (for lastSeen tracking)

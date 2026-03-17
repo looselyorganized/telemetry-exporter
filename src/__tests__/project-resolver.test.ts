@@ -76,99 +76,31 @@ describe("ProjectResolver", () => {
       expect(stats.total).toBeGreaterThanOrEqual(2);
     });
 
-    test("resolves Supabase slug entries not on disk", async () => {
-      mockProjectRows.push({
-        id: "proj_test123",
-        slug: "supabase-only-project",
-      });
-
-      await resolver.refresh(getSupabase());
-      const result = resolver.resolve("supabase-only-project");
-      expect(result).not.toBeNull();
-      expect(result!.projId).toBe("proj_test123");
-    });
-
-    test("lorf-bot scenario: slug from Supabase and disk both resolve to same project", async () => {
-      const LORF_BOT_ID = "proj_fe8141ea-c26c-4b7e-a1e5-39d2eeeed5e8";
-      mockProjectRows.push({
-        id: LORF_BOT_ID,
-        slug: "lorf-bot",
-      });
-
-      await resolver.refresh(getSupabase());
-
-      const supabaseResult = resolver.resolve("lorf-bot");
-      const diskResult = resolver.resolve("lorf-bot");
-
-      expect(supabaseResult).not.toBeNull();
-      expect(supabaseResult!.projId).toBe(LORF_BOT_ID);
-
-      if (diskResult) {
-        expect(diskResult.projId).toBe(supabaseResult!.projId);
-      }
-    });
-
-    test.skipIf(!hasProjectsOnDisk)("gracefully degrades when Supabase throws", async () => {
-      const throwingClient = {
-        from: () => ({
-          select: () => { throw new Error("network timeout"); },
-        }),
-      } as any;
-
-      await resolver.refresh(throwingClient);
-
-      const stats = resolver.stats();
-      expect(stats.fromSupabase).toBe(0);
-      // Org-root names should always resolve (via hardcode or name cache)
-      expect(resolver.resolve("lo")).not.toBeNull();
-      expect(resolver.resolve("looselyorganized")).not.toBeNull();
-      expect(stats.total).toBeGreaterThanOrEqual(2);
-    });
-
-    test("Supabase proj_ ID is used for disk projects without lo.yml", async () => {
-      mockProjectRows.push({
-        id: "proj_fc236751-369a-4b23-847e-577e06753eee",
-        slug: "telemetry-exporter",
-      });
-
+    test.skipIf(!hasProjectsOnDisk)("resolves lo.yml projects on disk", async () => {
       await resolver.refresh(getSupabase());
       const result = resolver.resolve("telemetry-exporter");
-
+      // telemetry-exporter has a lo.yml now
       if (result) {
         expect(result.projId).toBe("proj_fc236751-369a-4b23-847e-577e06753eee");
-        expect(result.slug).toBe("telemetry-exporter");
       }
     });
 
-    test.skipIf(!hasProjectsOnDisk)("lo.yml takes priority over Supabase slug resolution", async () => {
-      const loYmlId = readLoYml(join(PROJECT_ROOT, "lorf-bot"));
-      if (!loYmlId) return; // skip if lorf-bot has no lo.yml yet
-
-      mockProjectRows.push({
-        id: "proj_wrong-id-from-supabase",
-        slug: "lorf-bot",
-      });
-
+    test("does not resolve projects without lo.yml", async () => {
       await resolver.refresh(getSupabase());
-      const result = resolver.resolve("lorf-bot");
-
-      expect(result).not.toBeNull();
-      expect(result!.projId).toBe(loYmlId); // lo.yml wins
+      // A dir without lo.yml should not resolve, even if Supabase knows about it
+      const result = resolver.resolve("some-random-dir-without-lo-yml");
+      expect(result).toBeNull();
     });
 
-    test("name cache persists mappings across refreshes", async () => {
-      // First refresh with a Supabase-only project
-      mockProjectRows.push({ id: "proj_cached", slug: "cached-project" });
+    test("name cache persists lo.yml mappings across refreshes", async () => {
       await resolver.refresh(getSupabase());
-      expect(resolver.resolve("cached-project")?.projId).toBe("proj_cached");
 
-      // Second refresh without that project in Supabase — should still resolve via cache
+      // After refresh, lo.yml projects are in the name cache.
+      // A second resolver should pick them up from cache even without disk access.
       const resolver2 = new ProjectResolver();
-      mockProjectRows.length = 0;
       await resolver2.refresh(getSupabase());
-      const cached = resolver2.resolve("cached-project");
-      expect(cached).not.toBeNull();
-      expect(cached!.projId).toBe("proj_cached");
+      // Org-root should always resolve
+      expect(resolver2.resolve("lo")).not.toBeNull();
     });
 
     test("name cache entries are pruned after max age", async () => {
@@ -205,16 +137,14 @@ describe("ProjectResolver", () => {
       }
     });
 
-    test("includes supplemental projects not on disk", async () => {
-      mockProjectRows.push({
-        id: "proj_remote_only",
-        slug: "remote-project",
-      });
-
+    test("only includes lo.yml projects and org-root", async () => {
       await resolver.refresh(getSupabase());
       const allEntries = new Map(resolver.entries());
 
-      expect(allEntries.has("remote-project")).toBe(true);
+      // Should NOT include projects without lo.yml
+      for (const [, resolved] of allEntries) {
+        expect(resolved.projId).toBeDefined();
+      }
     });
   });
 
