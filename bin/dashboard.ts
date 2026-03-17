@@ -33,7 +33,7 @@ const supabase = createClient(url, key, {
 
 // ─── Snapshot cache (coalesces concurrent requests) ─────────────────────────
 
-let cachedSnapshot: { local: LocalData; remote: RemoteData; ts: number } | null = null;
+let cachedSnapshot: { local: LocalData; remote: RemoteData; slugMap: Record<string, string>; ts: number } | null = null;
 const CACHE_TTL = 5_000;
 
 async function getSnapshot(): Promise<{ local: LocalData; remote: RemoteData }> {
@@ -48,7 +48,13 @@ async function getSnapshot(): Promise<{ local: LocalData; remote: RemoteData }> 
   const local = readAllLocal(resolver);
   const remote = await readAllRemote(supabase, local.logStartDate ?? undefined);
 
-  cachedSnapshot = { local, remote, ts: Date.now() };
+  // Build projId → slug lookup for dashboard display
+  const slugMap: Record<string, string> = {};
+  for (const [, resolved] of resolver.entries()) {
+    slugMap[resolved.projId] = resolved.slug;
+  }
+
+  cachedSnapshot = { local, remote, slugMap, ts: Date.now() };
   return cachedSnapshot;
 }
 
@@ -77,7 +83,7 @@ async function handleErrors(): Promise<Response> {
 }
 
 async function handleCompare(type: string): Promise<Response> {
-  const { local, remote } = await getSnapshot();
+  const { local, remote, slugMap } = await getSnapshot();
 
   const compareFns: Record<string, () => ReturnType<typeof compareEvents>> = {
     events: () => compareEvents(local, remote),
@@ -90,7 +96,7 @@ async function handleCompare(type: string): Promise<Response> {
   const fn = compareFns[type];
   if (!fn) return new Response("Not found", { status: 404 });
 
-  return Response.json(fn());
+  return Response.json({ ...fn(), slugMap });
 }
 
 // ─── HTML Dashboard ─────────────────────────────────────────────────────────
@@ -335,7 +341,7 @@ function dashboardHtml(): string {
 
 <div class="tabs" id="tabs">
   <button class="tab active" data-tab="events">Events</button>
-  <button class="tab" data-tab="metrics">Metrics</button>
+  <button class="tab" data-tab="metrics">Messages</button>
   <button class="tab" data-tab="tokens">Tokens</button>
   <button class="tab" data-tab="models">Models</button>
   <button class="tab" data-tab="projects">Projects</button>
@@ -375,7 +381,12 @@ function el(tag, cls, text) {
   return e;
 }
 
-function buildSide(title, data, remoteData, discMap, isRemote) {
+function displayKey(key, slugMap) {
+  if (slugMap && slugMap[key]) return slugMap[key] + ' (' + key.slice(0, 13) + '…)';
+  return key;
+}
+
+function buildSide(title, data, remoteData, discMap, isRemote, slugMap) {
   var source = isRemote ? remoteData : data;
   var side = el('div', 'side');
   side.appendChild(el('div', 'side-title', title));
@@ -386,7 +397,7 @@ function buildSide(title, data, remoteData, discMap, isRemote) {
     var val = source[key] || 0;
     var disc = discMap[key];
     var row = el('div', 'row');
-    var keyEl = el('span', 'row-key', key);
+    var keyEl = el('span', 'row-key', displayKey(key, slugMap));
     keyEl.title = key;
     row.appendChild(keyEl);
 
@@ -429,9 +440,10 @@ function renderComparison(panel, result) {
     discMap[result.discrepancies[i].key] = result.discrepancies[i];
   }
 
+  var slugMap = result.slugMap || {};
   var grid = el('div', 'comparison');
-  grid.appendChild(buildSide('LOCAL', result.local, result.remote, discMap, false));
-  grid.appendChild(buildSide('SUPABASE', result.local, result.remote, discMap, true));
+  grid.appendChild(buildSide('LOCAL', result.local, result.remote, discMap, false, slugMap));
+  grid.appendChild(buildSide('SUPABASE', result.local, result.remote, discMap, true, slugMap));
   panel.appendChild(grid);
 
   var summary = el('div', 'summary');
@@ -446,7 +458,7 @@ function renderComparison(panel, result) {
       var d = result.discrepancies[j];
       var row = el('div', 'disc-row');
       row.appendChild(el('span', 'badge ' + d.severity, d.severity));
-      row.appendChild(el('span', 'row-key', d.key));
+      row.appendChild(el('span', 'row-key', displayKey(d.key, slugMap)));
       var detail = 'local: ' + formatNum(d.local) + ' / remote: ' + formatNum(d.remote) +
         ' (diff: ' + (d.diff > 0 ? '+' : '') + formatNum(d.diff) + ', ' + (d.pctDiff * 100).toFixed(1) + '%)';
       row.appendChild(el('span', '', detail));

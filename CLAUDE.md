@@ -50,10 +50,19 @@ src/           Library code
 ### Key Data Flow
 
 1. `parsers.ts` reads `~/.claude/events.log` (pipe-delimited, emoji-tagged lines)
-2. `project/slug-resolver.ts` maps directory paths to project ids using git remote URL (`git remote get-url origin`)
+2. `project/resolver.ts` maps directory names → `proj_` IDs using (in priority order): `lo.yml` files, git remote URL + Supabase slug lookup, `.name-cache.json` for renamed dirs
 3. `project/scanner.ts` scans `~/.claude/projects/*/` JSONL files for per-project token usage
 4. `process/scanner.ts` → `process/watcher.ts` detects running Claude instances and activity state
 5. `sync.ts` pushes everything to Supabase tables: `events`, `projects`, `daily_metrics`, `facility_status`, `project_telemetry`
+
+### Project Identity
+
+Each LO project has a `lo.yml` file at its root with a stable `proj_` UUID:
+```yaml
+id: proj_fe8141ea-c26c-4b7e-a1e5-39d2eeeed5e8
+```
+
+The resolver reads these files directly — no git remote or Supabase lookup needed. A `.name-cache.json` file at the exporter root persists all `dirName → projId` associations, so old directory names still resolve after renames.
 
 ### Path Resolution
 

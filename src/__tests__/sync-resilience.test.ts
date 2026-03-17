@@ -247,7 +247,7 @@ describe("upsertProject", () => {
     // Upsert succeeds
     resultQueue.push({ data: null, error: null });
 
-    const ok = await upsertProject("proj_test", "test", "test", "public");
+    const ok = await upsertProject("proj_test", "test");
     expect(ok).toBe(true);
   });
 
@@ -263,12 +263,7 @@ describe("upsertProject", () => {
       error: null,
     });
 
-    const ok = await upsertProject(
-      "proj_test",
-      "test",
-      "test-dir",
-      "private"
-    );
+    const ok = await upsertProject("proj_test", "test");
     expect(ok).toBe(true);
   });
 
@@ -284,7 +279,7 @@ describe("upsertProject", () => {
       error: { message: "update also failed" },
     });
 
-    const ok = await upsertProject("proj_test", "test", "test", "public");
+    const ok = await upsertProject("proj_test", "test");
     expect(ok).toBe(false);
   });
 });

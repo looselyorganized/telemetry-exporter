@@ -53,7 +53,6 @@ import { pushAgentState } from "../src/db/agent-state";
 import { ProcessWatcher } from "../src/process/watcher";
 import {
   loadVisibilityCache,
-  getVisibility,
 } from "../src/visibility-cache";
 import { ProjectResolver } from "../src/project/resolver";
 import { reportError, clearErrors } from "../src/errors";
@@ -134,7 +133,7 @@ async function refreshResolver(): Promise<void> {
   await resolver.refresh(getSupabase());
   const stats = resolver.stats();
   console.log(
-    `  Project maps: ${stats.total} projects mapped (disk: ${stats.fromDisk}, supabase: ${stats.fromSupabase}, legacy: ${stats.fromLegacy})`
+    `  Project maps: ${stats.total} projects mapped (lo.yml: ${stats.fromLoYml}, disk: ${stats.fromDisk}, supabase: ${stats.fromSupabase}, cache: ${stats.fromNameCache})`
   );
 }
 
@@ -150,6 +149,7 @@ let cachedLifetimeCounters: Record<string, LifetimeCounters> = {};
 
 // Cache per-project today tokens for project_telemetry writes
 let cachedTodayTokensByProject: Record<string, TodayTokens> = {};
+
 
 // Cache all seen log entries to avoid re-reading the entire events.log
 let allSeenEntries: LogEntry[] = [];
@@ -211,12 +211,11 @@ async function ensureProjects(entries: LogEntry[]): Promise<void> {
   for (const projId of newProjIds) {
     const localName = projIdToLocal.get(projId) ?? "";
     const slug = projIdToSlug.get(projId) ?? "";
-    const visibility = getVisibility(localName);
     const firstEntry = entries.find((e) => toProjId(e.project) === projId);
-    const ok = await upsertProject(projId, slug, localName, visibility, firstEntry?.parsedTimestamp ?? undefined);
+    const ok = await upsertProject(projId, slug, firstEntry?.parsedTimestamp ?? undefined);
     if (ok) {
       knownProjects.add(projId);
-      console.log(`  Project registered: ${slug} [${projId}]${slug !== localName ? ` (dir: ${localName})` : ""} (${visibility})`);
+      console.log(`  Project registered: ${slug} [${projId}]${slug !== localName ? ` (dir: ${localName})` : ""}`);
       await drainBufferedEvents(projId, slug);
     } else {
       tracker.markFailed(projId, localName, slug);
@@ -241,8 +240,7 @@ async function retryFailedRegistrations(currentCycle: number): Promise<void> {
     const meta = tracker.getMeta(projId);
     if (!meta) continue;
 
-    const visibility = getVisibility(meta.dirName);
-    const ok = await upsertProject(projId, meta.slug, meta.dirName, visibility);
+    const ok = await upsertProject(projId, meta.slug);
 
     if (ok) {
       knownProjects.add(projId);

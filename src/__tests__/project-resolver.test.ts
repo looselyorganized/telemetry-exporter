@@ -1,7 +1,8 @@
-import { describe, test, expect, beforeEach } from "bun:test";
+import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { mock } from "bun:test";
-import { existsSync } from "fs";
+import { existsSync, writeFileSync, mkdirSync, rmSync } from "fs";
 import { join } from "path";
+import { tmpdir } from "os";
 
 // Mock Supabase for tests that call refresh()
 const mockProjectRows: any[] = [];
@@ -20,12 +21,16 @@ mock.module("@supabase/supabase-js", () => ({
 const { initSupabase, getSupabase } = await import("../db/client");
 initSupabase("http://fake", "fake-key");
 
-const { ProjectResolver } = await import("../project/resolver");
+const { ProjectResolver, readLoYml, setNameCachePath, resetNameCachePath } = await import("../project/resolver");
 const { PROJECT_ROOT } = await import("../project/slug-resolver");
 
 // Some tests depend on PROJECT_ROOT existing with real projects on disk
 const hasProjectsOnDisk = existsSync(PROJECT_ROOT) &&
   existsSync(join(PROJECT_ROOT, "telemetry-exporter"));
+
+// Redirect name cache to a temp file so tests don't pollute the real cache
+const testCacheDir = join(tmpdir(), "lo-resolver-test-" + process.pid);
+const testCacheFile = join(testCacheDir, ".name-cache.json");
 
 describe("ProjectResolver", () => {
   let resolver: InstanceType<typeof ProjectResolver>;
@@ -33,6 +38,13 @@ describe("ProjectResolver", () => {
   beforeEach(() => {
     resolver = new ProjectResolver();
     mockProjectRows.length = 0;
+    mkdirSync(testCacheDir, { recursive: true });
+    setNameCachePath(testCacheFile);
+  });
+
+  afterEach(() => {
+    resetNameCachePath();
+    rmSync(testCacheDir, { recursive: true, force: true });
   });
 
   describe("resolve()", () => {
@@ -65,7 +77,6 @@ describe("ProjectResolver", () => {
     });
 
     test("resolves Supabase slug entries not on disk", async () => {
-      // Simulate a project known to Supabase but not on local disk
       mockProjectRows.push({
         id: "proj_test123",
         slug: "supabase-only-project",
@@ -78,7 +89,6 @@ describe("ProjectResolver", () => {
     });
 
     test("lorf-bot scenario: slug from Supabase and disk both resolve to same project", async () => {
-      // Use the real projId from disk so disk + Supabase agree
       const LORF_BOT_ID = "proj_fe8141ea-c26c-4b7e-a1e5-39d2eeeed5e8";
       mockProjectRows.push({
         id: LORF_BOT_ID,
@@ -90,18 +100,15 @@ describe("ProjectResolver", () => {
       const supabaseResult = resolver.resolve("lorf-bot");
       const diskResult = resolver.resolve("lorf-bot");
 
-      // Slug from Supabase resolves (disk wins if present, Supabase otherwise)
       expect(supabaseResult).not.toBeNull();
       expect(supabaseResult!.projId).toBe(LORF_BOT_ID);
 
-      // Disk and Supabase agree on the same slug
       if (diskResult) {
         expect(diskResult.projId).toBe(supabaseResult!.projId);
       }
     });
 
     test.skipIf(!hasProjectsOnDisk)("gracefully degrades when Supabase throws", async () => {
-      // Create a client whose .from().select() throws
       const throwingClient = {
         from: () => ({
           select: () => { throw new Error("network timeout"); },
@@ -110,17 +117,15 @@ describe("ProjectResolver", () => {
 
       await resolver.refresh(throwingClient);
 
-      // Org-root hardcode should still populate
       const stats = resolver.stats();
-      expect(stats.fromDisk).toBeGreaterThanOrEqual(2); // org-root hardcodes
       expect(stats.fromSupabase).toBe(0);
+      // Org-root names should always resolve (via hardcode or name cache)
       expect(resolver.resolve("lo")).not.toBeNull();
-      // Without Supabase, disk projects can't resolve proj_ IDs
-      // so they won't appear in the map
+      expect(resolver.resolve("looselyorganized")).not.toBeNull();
+      expect(stats.total).toBeGreaterThanOrEqual(2);
     });
 
-    test("Supabase proj_ ID is used for disk projects", async () => {
-      // Simulate Supabase knowing about telemetry-exporter
+    test("Supabase proj_ ID is used for disk projects without lo.yml", async () => {
       mockProjectRows.push({
         id: "proj_fc236751-369a-4b23-847e-577e06753eee",
         slug: "telemetry-exporter",
@@ -134,6 +139,57 @@ describe("ProjectResolver", () => {
         expect(result.slug).toBe("telemetry-exporter");
       }
     });
+
+    test.skipIf(!hasProjectsOnDisk)("lo.yml takes priority over Supabase slug resolution", async () => {
+      const loYmlId = readLoYml(join(PROJECT_ROOT, "lorf-bot"));
+      if (!loYmlId) return; // skip if lorf-bot has no lo.yml yet
+
+      mockProjectRows.push({
+        id: "proj_wrong-id-from-supabase",
+        slug: "lorf-bot",
+      });
+
+      await resolver.refresh(getSupabase());
+      const result = resolver.resolve("lorf-bot");
+
+      expect(result).not.toBeNull();
+      expect(result!.projId).toBe(loYmlId); // lo.yml wins
+    });
+
+    test("name cache persists mappings across refreshes", async () => {
+      // First refresh with a Supabase-only project
+      mockProjectRows.push({ id: "proj_cached", slug: "cached-project" });
+      await resolver.refresh(getSupabase());
+      expect(resolver.resolve("cached-project")?.projId).toBe("proj_cached");
+
+      // Second refresh without that project in Supabase — should still resolve via cache
+      const resolver2 = new ProjectResolver();
+      mockProjectRows.length = 0;
+      await resolver2.refresh(getSupabase());
+      const cached = resolver2.resolve("cached-project");
+      expect(cached).not.toBeNull();
+      expect(cached!.projId).toBe("proj_cached");
+    });
+
+    test("name cache entries are pruned after max age", async () => {
+      // Seed cache with a stale entry (lastSeen far in the past)
+      const staleCache = {
+        "dead-project": {
+          projId: "proj_dead",
+          slug: "dead-project",
+          lastSeen: new Date(Date.now() - 60 * 24 * 60 * 60 * 1000).toISOString(), // 60 days ago
+        },
+      };
+      writeFileSync(testCacheFile, JSON.stringify(staleCache));
+
+      await resolver.refresh(getSupabase());
+
+      // Stale entry should NOT be in the resolver (it's not live)
+      // and should be pruned from the cache file
+      const resolver2 = new ProjectResolver();
+      await resolver2.refresh(getSupabase());
+      expect(resolver2.resolve("dead-project")).toBeNull();
+    });
   });
 
   describe("entries()", () => {
@@ -142,7 +198,6 @@ describe("ProjectResolver", () => {
       const allEntries = [...resolver.entries()];
       expect(allEntries.length).toBeGreaterThanOrEqual(2);
 
-      // Each entry has dirName, projId, and slug
       for (const [dirName, resolved] of allEntries) {
         expect(typeof dirName).toBe("string");
         expect(resolved.projId).toBeDefined();
@@ -159,7 +214,6 @@ describe("ProjectResolver", () => {
       await resolver.refresh(getSupabase());
       const allEntries = new Map(resolver.entries());
 
-      // Supabase-only entries should appear in entries() via slug
       expect(allEntries.has("remote-project")).toBe(true);
     });
   });
@@ -169,12 +223,44 @@ describe("ProjectResolver", () => {
       await resolver.refresh(getSupabase());
       const stats = resolver.stats();
       expect(stats).toHaveProperty("total");
+      expect(stats).toHaveProperty("fromLoYml");
       expect(stats).toHaveProperty("fromDisk");
       expect(stats).toHaveProperty("fromSupabase");
-      expect(stats).toHaveProperty("fromLegacy");
+      expect(stats).toHaveProperty("fromNameCache");
       expect(stats.total).toBe(
-        stats.fromDisk + stats.fromSupabase + stats.fromLegacy
+        stats.fromLoYml + stats.fromDisk + stats.fromSupabase + stats.fromNameCache
       );
     });
+  });
+});
+
+describe("readLoYml", () => {
+  const tmpDir = join(import.meta.dirname!, "../../.test-lo-yml");
+
+  beforeEach(() => {
+    mkdirSync(tmpDir, { recursive: true });
+  });
+
+  afterEach(() => {
+    rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  test("reads proj_ ID from lo.yml", () => {
+    writeFileSync(join(tmpDir, "lo.yml"), "id: proj_abc-123\n");
+    expect(readLoYml(tmpDir)).toBe("proj_abc-123");
+  });
+
+  test("returns null for missing file", () => {
+    expect(readLoYml(tmpDir)).toBeNull();
+  });
+
+  test("returns null for malformed content", () => {
+    writeFileSync(join(tmpDir, "lo.yml"), "name: test\n");
+    expect(readLoYml(tmpDir)).toBeNull();
+  });
+
+  test("ignores non-proj_ ids", () => {
+    writeFileSync(join(tmpDir, "lo.yml"), "id: not-a-proj-id\n");
+    expect(readLoYml(tmpDir)).toBeNull();
   });
 });

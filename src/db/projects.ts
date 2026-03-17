@@ -12,8 +12,6 @@ import { checkResult } from "./check-result";
 export async function upsertProject(
   projId: string,
   contentSlug: string,
-  localName: string,
-  visibility: "public" | "private",
   timestamp?: Date
 ): Promise<boolean> {
   const now = timestamp ?? new Date();
@@ -23,8 +21,6 @@ export async function upsertProject(
       {
         id: projId,
         slug: contentSlug,
-        state: visibility,
-        status: "explore",
         last_active: now.toISOString(),
       },
       { onConflict: "id", ignoreDuplicates: false }
@@ -37,7 +33,6 @@ export async function upsertProject(
       .from("projects")
       .update({
         slug: contentSlug,
-        state: visibility,
         last_active: now.toISOString(),
       })
       .eq("id", projId);

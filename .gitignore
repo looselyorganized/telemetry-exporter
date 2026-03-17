@@ -5,3 +5,4 @@ node_modules/
 .project-mapping.json
 .slug-mapping.json
 .visibility-cache.json
+.name-cache.json
