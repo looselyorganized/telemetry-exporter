@@ -165,6 +165,7 @@ export class ProcessWatcher {
     const activeProjects = [...uniqueProjIds].map((projId) => ({
       name: projId,
       active: activeProjIds.has(projId),
+      count: byProject.get(projId)?.count ?? 1,
     }));
 
     return {
