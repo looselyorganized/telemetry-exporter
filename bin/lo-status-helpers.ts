@@ -4,9 +4,27 @@
  * that prevent direct import in tests.
  */
 
-import { parseFrontmatter } from "../src/project/slug-resolver";
+/** Parse lines of key: value YAML pairs. Handles quoted values and inline comments. */
+function parseYamlLines(lines: string): Record<string, string> {
+  const result: Record<string, string> = {};
+  for (const line of lines.split("\n")) {
+    const kv = line.match(/^(\w[\w-]*)\s*:\s*(.+)/);
+    if (!kv) continue;
+    let v = kv[2].trim();
+    v = v.replace(/^["']([^"']*)["']\s*#.*$/, "$1");
+    v = v.replace(/\s+#.*$/, "");
+    v = v.replace(/^["']|["']$/g, "");
+    result[kv[1]] = v;
+  }
+  return result;
+}
 
-export { parseFrontmatter };
+/** Extract key-value pairs from YAML frontmatter between --- fences. */
+export function parseFrontmatter(content: string): Record<string, string> {
+  const match = content.match(/^---\s*\n([\s\S]*?)\n---/);
+  if (!match) return {};
+  return parseYamlLines(match[1]);
+}
 
 export interface Feature {
   id: string;

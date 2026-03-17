@@ -23,7 +23,7 @@ initSupabase("http://fake", "fake-key");
 const { ProjectResolver } = await import("../project/resolver");
 const { PROJECT_ROOT } = await import("../project/slug-resolver");
 
-// Some tests depend on PROJECT_ROOT existing with real .lo/ projects on disk
+// Some tests depend on PROJECT_ROOT existing with real projects on disk
 const hasProjectsOnDisk = existsSync(PROJECT_ROOT) &&
   existsSync(join(PROJECT_ROOT, "telemetry-exporter"));
 
@@ -110,30 +110,28 @@ describe("ProjectResolver", () => {
 
       await resolver.refresh(throwingClient);
 
-      // Disk + org-root + legacy should still populate
+      // Org-root hardcode should still populate
       const stats = resolver.stats();
-      expect(stats.fromDisk).toBeGreaterThanOrEqual(2);
+      expect(stats.fromDisk).toBeGreaterThanOrEqual(2); // org-root hardcodes
       expect(stats.fromSupabase).toBe(0);
       expect(resolver.resolve("lo")).not.toBeNull();
-      expect(resolver.resolve("telemetry-exporter")).not.toBeNull();
+      // Without Supabase, disk projects can't resolve proj_ IDs
+      // so they won't appear in the map
     });
 
-    test("disk wins over Supabase on conflicts", async () => {
+    test("Supabase proj_ ID is used for disk projects", async () => {
+      // Simulate Supabase knowing about telemetry-exporter
+      mockProjectRows.push({
+        id: "proj_fc236751-369a-4b23-847e-577e06753eee",
+        slug: "telemetry-exporter",
+      });
+
       await resolver.refresh(getSupabase());
-      const diskResult = resolver.resolve("telemetry-exporter");
+      const result = resolver.resolve("telemetry-exporter");
 
-      if (diskResult) {
-        // Now add a Supabase entry with a conflicting projId
-        mockProjectRows.push({
-          id: "proj_imposter",
-          slug: "telemetry-exporter",
-        });
-
-        // Re-refresh — disk should still win
-        await resolver.refresh(getSupabase());
-        const afterResult = resolver.resolve("telemetry-exporter");
-        expect(afterResult!.projId).toBe(diskResult.projId);
-        expect(afterResult!.projId).not.toBe("proj_imposter");
+      if (result) {
+        expect(result.projId).toBe("proj_fc236751-369a-4b23-847e-577e06753eee");
+        expect(result.slug).toBe("telemetry-exporter");
       }
     });
   });
