@@ -139,13 +139,19 @@ export class ProcessWatcher {
 
     if (events.length === 0) return null;
 
-    // Compute per-project totals for affected projects using windowed active state
-    const affectedProjIds = new Set(
-      events.map((e) => e.project).filter((s) => s !== "unknown")
+    // Compute per-project totals for ALL projects with processes (not just affected)
+    // so that project_telemetry stays current for every project
+    const windowActiveProcs = state.processes.filter((p) =>
+      this.isWindowActive(p.pid)
+    );
+    const activeProjIds = new Set(windowActiveProcs.map((p) => p.projId));
+
+    const uniqueProjIds = new Set(
+      state.processes.map((p) => p.projId).filter((s) => s !== "unknown")
     );
 
     const byProject = new Map<string, ProjectAgentState>();
-    for (const projId of affectedProjIds) {
+    for (const projId of uniqueProjIds) {
       let count = 0;
       let active = 0;
       for (const proc of state.processes) {
@@ -156,15 +162,6 @@ export class ProcessWatcher {
       byProject.set(projId, { active, count });
     }
 
-    // Facility-level counts also use windowed state
-    const windowActiveProcs = state.processes.filter((p) =>
-      this.isWindowActive(p.pid)
-    );
-    const activeProjIds = new Set(windowActiveProcs.map((p) => p.projId));
-
-    const uniqueProjIds = new Set(
-      state.processes.map((p) => p.projId).filter((s) => s !== "unknown")
-    );
     const activeProjects = [...uniqueProjIds].map((projId) => ({
       name: projId,
       active: activeProjIds.has(projId),
