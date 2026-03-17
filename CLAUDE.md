@@ -40,7 +40,7 @@ src/           Library code
     watcher.ts         Sliding-window activity detection (40 ticks × 250ms)
   project/
     scanner.ts         JSONL token aggregation from ~/.claude/projects/
-    slug-resolver.ts   Maps directory paths → id via .lo/PROJECT.md frontmatter
+    slug-resolver.ts   Maps directory paths → project id via git remote URL
   verify/
     local-reader.ts    Reads all local telemetry sources for dashboard
     remote-reader.ts   Queries Supabase tables for dashboard comparison
@@ -50,7 +50,7 @@ src/           Library code
 ### Key Data Flow
 
 1. `parsers.ts` reads `~/.claude/events.log` (pipe-delimited, emoji-tagged lines)
-2. `project/slug-resolver.ts` maps directory paths to project ids using `.lo/PROJECT.md` frontmatter
+2. `project/slug-resolver.ts` maps directory paths to project ids using git remote URL (`git remote get-url origin`)
 3. `project/scanner.ts` scans `~/.claude/projects/*/` JSONL files for per-project token usage
 4. `process/scanner.ts` → `process/watcher.ts` detects running Claude instances and activity state
 5. `sync.ts` pushes everything to Supabase tables: `events`, `projects`, `daily_metrics`, `facility_status`, `project_telemetry`
