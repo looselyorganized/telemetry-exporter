@@ -43,7 +43,7 @@ async function getSnapshot(): Promise<{ local: LocalData; remote: RemoteData }> 
 
   // Single resolver handles disk + Supabase local_names + org-root + legacy
   const resolver = new ProjectResolver();
-  await resolver.refresh(supabase);
+  await resolver.refresh();
 
   const local = readAllLocal(resolver);
   const remote = await readAllRemote(supabase, local.logStartDate ?? undefined);

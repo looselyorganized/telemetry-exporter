@@ -53,7 +53,7 @@ describe("ProjectResolver", () => {
     });
 
     test("resolves org-root names", async () => {
-      await resolver.refresh(getSupabase());
+      await resolver.refresh();
       const result = resolver.resolve("looselyorganized");
       expect(result).not.toBeNull();
       expect(result!.projId).toBe("proj_org-root");
@@ -61,7 +61,7 @@ describe("ProjectResolver", () => {
     });
 
     test("resolves org-root 'lo' alias", async () => {
-      await resolver.refresh(getSupabase());
+      await resolver.refresh();
       const result = resolver.resolve("lo");
       expect(result).not.toBeNull();
       expect(result!.projId).toBe("proj_org-root");
@@ -70,14 +70,14 @@ describe("ProjectResolver", () => {
 
   describe("refresh()", () => {
     test("loads projects from disk", async () => {
-      await resolver.refresh(getSupabase());
+      await resolver.refresh();
       const stats = resolver.stats();
       // At minimum, org-root should be loaded
       expect(stats.total).toBeGreaterThanOrEqual(2);
     });
 
     test.skipIf(!hasProjectsOnDisk)("resolves lo.yml projects on disk", async () => {
-      await resolver.refresh(getSupabase());
+      await resolver.refresh();
       const result = resolver.resolve("telemetry-exporter");
       // telemetry-exporter has a lo.yml now
       if (result) {
@@ -86,19 +86,19 @@ describe("ProjectResolver", () => {
     });
 
     test("does not resolve projects without lo.yml", async () => {
-      await resolver.refresh(getSupabase());
+      await resolver.refresh();
       // A dir without lo.yml should not resolve, even if Supabase knows about it
       const result = resolver.resolve("some-random-dir-without-lo-yml");
       expect(result).toBeNull();
     });
 
     test("name cache persists lo.yml mappings across refreshes", async () => {
-      await resolver.refresh(getSupabase());
+      await resolver.refresh();
 
       // After refresh, lo.yml projects are in the name cache.
       // A second resolver should pick them up from cache even without disk access.
       const resolver2 = new ProjectResolver();
-      await resolver2.refresh(getSupabase());
+      await resolver2.refresh();
       // Org-root should always resolve
       expect(resolver2.resolve("lo")).not.toBeNull();
     });
@@ -114,19 +114,19 @@ describe("ProjectResolver", () => {
       };
       writeFileSync(testCacheFile, JSON.stringify(staleCache));
 
-      await resolver.refresh(getSupabase());
+      await resolver.refresh();
 
       // Stale entry should NOT be in the resolver (it's not live)
       // and should be pruned from the cache file
       const resolver2 = new ProjectResolver();
-      await resolver2.refresh(getSupabase());
+      await resolver2.refresh();
       expect(resolver2.resolve("dead-project")).toBeNull();
     });
   });
 
   describe("entries()", () => {
     test("returns all known mappings", async () => {
-      await resolver.refresh(getSupabase());
+      await resolver.refresh();
       const allEntries = [...resolver.entries()];
       expect(allEntries.length).toBeGreaterThanOrEqual(2);
 
@@ -138,7 +138,7 @@ describe("ProjectResolver", () => {
     });
 
     test("only includes lo.yml projects and org-root", async () => {
-      await resolver.refresh(getSupabase());
+      await resolver.refresh();
       const allEntries = new Map(resolver.entries());
 
       // Should NOT include projects without lo.yml
@@ -150,15 +150,13 @@ describe("ProjectResolver", () => {
 
   describe("stats()", () => {
     test("returns resolution source breakdown", async () => {
-      await resolver.refresh(getSupabase());
+      await resolver.refresh();
       const stats = resolver.stats();
       expect(stats).toHaveProperty("total");
       expect(stats).toHaveProperty("fromLoYml");
-      expect(stats).toHaveProperty("fromDisk");
-      expect(stats).toHaveProperty("fromSupabase");
       expect(stats).toHaveProperty("fromNameCache");
       expect(stats.total).toBe(
-        stats.fromLoYml + stats.fromDisk + stats.fromSupabase + stats.fromNameCache
+        stats.fromLoYml + stats.fromNameCache
       );
     });
   });

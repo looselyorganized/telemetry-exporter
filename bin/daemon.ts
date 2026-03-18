@@ -51,9 +51,6 @@ import {
 import { batchUpsertProjectTelemetry, verifyProjectTelemetry } from "../src/db/telemetry";
 import { pushAgentState } from "../src/db/agent-state";
 import { ProcessWatcher } from "../src/process/watcher";
-import {
-  loadVisibilityCache,
-} from "../src/visibility-cache";
 import { ProjectResolver } from "../src/project/resolver";
 import { reportError, clearErrors } from "../src/errors";
 import { flushErrors, pruneResolved, clearErrorsTable } from "../src/db/errors";
@@ -110,7 +107,6 @@ console.log(`  Mode: ${IS_BACKFILL ? "BACKFILL + daemon" : "daemon (incremental)
 console.log();
 
 initSupabase(SUPABASE_URL, SUPABASE_KEY);
-loadVisibilityCache();
 
 // Clear live error state from previous runs
 clearErrors();
@@ -130,10 +126,10 @@ const tracker = new RegistrationRetryTracker();
 const resolver = new ProjectResolver();
 
 async function refreshResolver(): Promise<void> {
-  await resolver.refresh(getSupabase());
+  await resolver.refresh();
   const stats = resolver.stats();
   console.log(
-    `  Project maps: ${stats.total} projects mapped (lo.yml: ${stats.fromLoYml}, disk: ${stats.fromDisk}, supabase: ${stats.fromSupabase}, cache: ${stats.fromNameCache})`
+    `  Project maps: ${stats.total} projects mapped (lo.yml: ${stats.fromLoYml}, cache: ${stats.fromNameCache})`
   );
 }
 

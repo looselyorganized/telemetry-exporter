@@ -39,7 +39,7 @@ export interface ProcessDiff {
   facility: {
     status: "active" | "dormant";
     activeAgents: number;
-    activeProjects: Array<{ name: string; active: boolean }>;
+    activeProjects: Array<{ name: string; active: boolean; count: number }>;
   };
 }
 
@@ -139,17 +139,17 @@ export class ProcessWatcher {
 
     if (events.length === 0) return null;
 
-    // Compute per-project totals for ALL projects with processes (not just affected)
-    // so that project_telemetry stays current for every project
-    const windowActiveProcs = state.processes.filter((p) =>
-      this.isWindowActive(p.pid)
-    );
-    const activeProjIds = new Set(windowActiveProcs.map((p) => p.projId));
+    // Precompute window-active status once per PID (avoids repeated sliding window scans)
+    const windowActive = new Map<number, boolean>();
+    for (const proc of state.processes) {
+      windowActive.set(proc.pid, this.isWindowActive(proc.pid));
+    }
 
     const uniqueProjIds = new Set(
       state.processes.map((p) => p.projId).filter((s) => s !== "unknown")
     );
 
+    // Compute per-project totals for ALL projects with processes
     const byProject = new Map<string, ProjectAgentState>();
     for (const projId of uniqueProjIds) {
       let count = 0;
@@ -157,23 +157,24 @@ export class ProcessWatcher {
       for (const proc of state.processes) {
         if (proc.projId !== projId) continue;
         count++;
-        if (this.isWindowActive(proc.pid)) active++;
+        if (windowActive.get(proc.pid)) active++;
       }
       byProject.set(projId, { active, count });
     }
 
-    const activeProjects = [...uniqueProjIds].map((projId) => ({
-      name: projId,
-      active: activeProjIds.has(projId),
-      count: byProject.get(projId)?.count ?? 1,
-    }));
+    const activeAgentCount = [...windowActive.values()].filter(Boolean).length;
+
+    const activeProjects = [...uniqueProjIds].map((projId) => {
+      const proj = byProject.get(projId)!;
+      return { name: projId, active: proj.active > 0, count: proj.count };
+    });
 
     return {
       events,
       byProject,
       facility: {
-        status: windowActiveProcs.length > 0 ? "active" : "dormant",
-        activeAgents: windowActiveProcs.length,
+        status: activeAgentCount > 0 ? "active" : "dormant",
+        activeAgents: activeAgentCount,
         activeProjects,
       },
     };

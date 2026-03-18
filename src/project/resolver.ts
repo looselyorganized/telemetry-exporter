@@ -14,7 +14,6 @@
 
 import { readFileSync, readdirSync, writeFileSync } from "fs";
 import { join } from "path";
-import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   buildSlugMap,
   clearSlugCache,
@@ -31,8 +30,6 @@ export interface ResolvedProject {
 interface ResolutionStats {
   total: number;
   fromLoYml: number;
-  fromDisk: number;
-  fromSupabase: number;
   fromNameCache: number;
 }
 
@@ -123,8 +120,6 @@ export class ProjectResolver {
   private resolutionStats: ResolutionStats = {
     total: 0,
     fromLoYml: 0,
-    fromDisk: 0,
-    fromSupabase: 0,
     fromNameCache: 0,
   };
 
@@ -144,11 +139,9 @@ export class ProjectResolver {
    * 3. Org-root hardcode — ["looselyorganized", "lo"] → proj_org-root
    * 4. Persist all current mappings to name cache, prune stale entries
    */
-  async refresh(_supabase: SupabaseClient): Promise<void> {
+  async refresh(): Promise<void> {
     const newMap = new Map<string, ResolvedProject>();
     let fromLoYml = 0;
-    let fromDisk = 0;
-    const fromSupabase = 0;
     let fromNameCache = 0;
 
     // Build slug map for git remote slug derivation
@@ -191,7 +184,7 @@ export class ProjectResolver {
       if (!newMap.has(name)) {
         newMap.set(name, { projId: ORG_ROOT_ID, slug: "org-root" });
         liveKeys.add(name);
-        fromDisk++; // count hardcoded entries as disk-resolved
+        fromLoYml++; // org-root is a known identity, count with lo.yml
       }
     }
 
@@ -213,8 +206,6 @@ export class ProjectResolver {
     this.resolutionStats = {
       total: newMap.size,
       fromLoYml,
-      fromDisk,
-      fromSupabase,
       fromNameCache,
     };
   }
