@@ -112,19 +112,7 @@ describe("ProcessWatcher", () => {
     });
   });
 
-  test("emits instance:active after sustained activity crosses threshold", () => {
-    // ACTIVE_THRESHOLD is 0.15, WINDOW_SIZE is 40
-    // With a fresh window, we need ceil(0.15 * n) trues out of n ticks
-    // After 1 tick with isActive=true: 1/1 = 100% >= 15% => active immediately
-    setProcesses([makeProcess({ pid: 1, projId: "alpha", isActive: true })]);
-    const diff = watcher.tick();
-    expect(diff).not.toBeNull();
-    const events = diff!.events.map((e) => e.type);
-    expect(events).toContain("instance:created");
-    expect(events).toContain("instance:active");
-  });
-
-  test("emits instance:idle after sustained inactivity", () => {
+  test("activeAgents drops to 0 after sustained inactivity", () => {
     // First, make it active
     setProcesses([makeProcess({ pid: 1, projId: "alpha", isActive: true })]);
     watcher.tick();
@@ -150,12 +138,12 @@ describe("ProcessWatcher", () => {
     ]);
     const diff = watcher.tick();
     expect(diff).not.toBeNull();
-    expect(diff!.events).toHaveLength(3); // 2 created + 1 active (for pid 1)
+    // Hysteresis delays active — only 2 created events on first tick
+    expect(diff!.events).toHaveLength(2);
 
     const types = diff!.events.map((e) => `${e.type}:${e.pid}`);
     expect(types).toContain("instance:created:1");
     expect(types).toContain("instance:created:2");
-    expect(types).toContain("instance:active:1");
   });
 
   test("activeAgents reflects windowed state", () => {
@@ -202,5 +190,84 @@ describe("ProcessWatcher", () => {
     const diff = watcher.tick();
     expect(diff).not.toBeNull();
     expect(diff!.facility.status).toBe("dormant");
+  });
+
+  // -------------------------------------------------------------------------
+  // Hysteresis
+  // -------------------------------------------------------------------------
+  describe("hysteresis", () => {
+    test("active event requires 3 consecutive confirmations", () => {
+      setProcesses([makeProcess({ pid: 1, projId: "alpha", isActive: true })]);
+
+      // Tick 1: created, hysteresis count=1
+      const diff1 = watcher.tick();
+      expect(diff1!.events.map((e) => e.type)).toEqual(["instance:created"]);
+
+      // Tick 2: count=2, no events
+      expect(watcher.tick()).toBeNull();
+
+      // Tick 3: count=3, active fires
+      const diff3 = watcher.tick();
+      expect(diff3).not.toBeNull();
+      expect(diff3!.events).toEqual([
+        { type: "instance:active", project: "alpha", pid: 1 },
+      ]);
+    });
+
+    test("close cleans up hysteresis state for reopened PIDs", () => {
+      // Build up 2 hysteresis ticks (not yet confirmed)
+      setProcesses([makeProcess({ pid: 1, projId: "alpha", isActive: true })]);
+      watcher.tick(); // created, count=1
+      watcher.tick(); // count=2 (null)
+
+      // Close before hysteresis confirms
+      setProcesses([]);
+      const closeDiff = watcher.tick();
+      expect(closeDiff!.events).toEqual([
+        { type: "instance:closed", project: "alpha", pid: 1 },
+      ]);
+
+      // Reopen same PID — should start fresh
+      setProcesses([makeProcess({ pid: 1, projId: "alpha", isActive: true })]);
+      const reopenDiff = watcher.tick();
+      expect(reopenDiff!.events.map((e) => e.type)).toEqual([
+        "instance:created",
+      ]);
+
+      // Still needs 2 more ticks for active (not continuing from old count)
+      expect(watcher.tick()).toBeNull();
+      const activeDiff = watcher.tick();
+      expect(activeDiff!.events).toEqual([
+        { type: "instance:active", project: "alpha", pid: 1 },
+      ]);
+    });
+
+    test("idle event requires 3 confirmations after window crosses threshold", () => {
+      // Get process confirmed active
+      setProcesses([makeProcess({ pid: 1, projId: "alpha", isActive: true })]);
+      watcher.tick(); // created, count=1
+      watcher.tick(); // count=2
+      watcher.tick(); // count=3 → active, reportedActive=true
+
+      // Go idle — need window to drop below 15% first
+      // After 3 active + N inactive: 3/(3+N) < 0.15 → N > 17 → 18 ticks
+      setProcesses([makeProcess({ pid: 1, projId: "alpha", isActive: false })]);
+
+      // Tick 17 inactive: 3/20 = 0.15, still at threshold (active)
+      for (let i = 0; i < 17; i++) watcher.tick();
+
+      // Tick 18: 3/21 = 0.143, window crosses → hysteresis count=1
+      // Tick 19: count=2
+      // Tick 20: count=3 → idle event
+      watcher.tick(); // count=1
+      watcher.tick(); // count=2
+      const idleDiff = watcher.tick(); // count=3 → idle
+      expect(idleDiff).not.toBeNull();
+      expect(idleDiff!.events).toContainEqual({
+        type: "instance:idle",
+        project: "alpha",
+        pid: 1,
+      });
+    });
   });
 });

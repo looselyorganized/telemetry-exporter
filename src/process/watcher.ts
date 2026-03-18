@@ -5,8 +5,10 @@
  * Uses a sliding window to determine "active" vs "idle". A process must show
  * CPU activity in at least ACTIVE_THRESHOLD of the last WINDOW_SIZE ticks
  * to be considered active. This filters out GC spikes and event loop noise.
- * Going idle requires sustained inactivity; going active is near-instant
- * (a short burst of real work fills the threshold quickly).
+ * Both directions include hysteresis: a state change must persist for
+ * HYSTERESIS_TICKS consecutive ticks before being reported. Going idle
+ * is slower (window must decay below threshold first, then 3 ticks) while
+ * going active only needs the window to cross threshold plus 3 ticks.
  */
 
 import { getFacilityState } from "./scanner";
@@ -15,6 +17,8 @@ import { getFacilityState } from "./scanner";
 const WINDOW_SIZE = 40;
 /** Fraction of window that must show activity to count as "active". */
 const ACTIVE_THRESHOLD = 0.15; // 15% — about 6 ticks in 10s (1.5s of CPU in 10s)
+/** Consecutive ticks a state change must persist before reporting. */
+export const HYSTERESIS_TICKS = 3;
 
 export type ProcessEventType =
   | "instance:created"
@@ -63,6 +67,8 @@ export class ProcessWatcher {
   private activityWindow: Map<number, boolean[]> = new Map();
   /** Last reported state per PID (true = reported as active). */
   private reportedActive: Map<number, boolean> = new Map();
+  /** Consecutive ticks of pending state change per PID (hysteresis). */
+  private confirmationCount: Map<number, number> = new Map();
 
   /** Number of active agents based on windowed state (cheap in-memory check). */
   get activeAgents(): number {
@@ -105,24 +111,36 @@ export class ProcessWatcher {
 
     const events: ProcessEvent[] = [];
 
-    // Update sliding windows and detect transitions
+    // Update sliding windows and detect transitions (with hysteresis)
     for (const [pid, entry] of current) {
       this.pushWindow(pid, entry.isActive);
       const windowActive = this.isWindowActive(pid);
-      const wasReportedActive = this.reportedActive.get(pid) ?? false;
 
       if (!this.previous.has(pid)) {
+        // New process — emit created, apply hysteresis for initial active
         events.push({ type: "instance:created", project: entry.projId, pid });
-        if (windowActive) {
-          events.push({ type: "instance:active", project: entry.projId, pid });
-        }
-        this.reportedActive.set(pid, windowActive);
-      } else if (windowActive && !wasReportedActive) {
-        events.push({ type: "instance:active", project: entry.projId, pid });
-        this.reportedActive.set(pid, true);
-      } else if (!windowActive && wasReportedActive) {
-        events.push({ type: "instance:idle", project: entry.projId, pid });
         this.reportedActive.set(pid, false);
+        if (windowActive) {
+          this.confirmationCount.set(pid, 1);
+        }
+      } else {
+        const wasReportedActive = this.reportedActive.get(pid) ?? false;
+        if (windowActive !== wasReportedActive) {
+          const count = (this.confirmationCount.get(pid) ?? 0) + 1;
+          if (count >= HYSTERESIS_TICKS) {
+            events.push({
+              type: windowActive ? "instance:active" : "instance:idle",
+              project: entry.projId,
+              pid,
+            });
+            this.reportedActive.set(pid, windowActive);
+            this.confirmationCount.delete(pid);
+          } else {
+            this.confirmationCount.set(pid, count);
+          }
+        } else {
+          this.confirmationCount.delete(pid);
+        }
       }
     }
 
@@ -132,6 +150,7 @@ export class ProcessWatcher {
         events.push({ type: "instance:closed", project: prev.projId, pid });
         this.activityWindow.delete(pid);
         this.reportedActive.delete(pid);
+        this.confirmationCount.delete(pid);
       }
     }
 
