@@ -207,6 +207,16 @@ export class LogTailer {
     }
   }
 
+  /** Set the byte offset to a specific position (for restoring from cursor). */
+  resetOffset(offset: number): void {
+    this.offset = offset;
+  }
+
+  /** Get the current byte offset (for persisting to cursor). */
+  currentOffset(): number {
+    return this.offset;
+  }
+
   private parseLines(data: string): LogEntry[] {
     return data
       .split("\n")

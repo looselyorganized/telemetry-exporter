@@ -240,6 +240,46 @@ describe("LogTailer", () => {
     const tailer = new LogTailer("/nonexistent/path/log.txt");
     expect(tailer.poll()).toHaveLength(0);
   });
+
+  test("currentOffset returns 0 before any read", () => {
+    const dir = makeTempDir();
+    const logPath = join(dir, "test.log");
+    writeFileSync(logPath, "03/10 1:00 PM│proj│main│🔧 tool\n");
+
+    const tailer = new LogTailer(logPath);
+    expect(tailer.currentOffset()).toBe(0);
+  });
+
+  test("currentOffset returns byte position after readAll", () => {
+    const dir = makeTempDir();
+    const logPath = join(dir, "test.log");
+    writeFileSync(logPath, "03/10 1:00 PM│proj│main│🔧 tool call\n03/10 1:01 PM│proj│main│📖 read file\n");
+
+    const tailer = new LogTailer(logPath);
+    tailer.readAll();
+    expect(tailer.currentOffset()).toBeGreaterThan(0);
+  });
+
+  test("resetOffset changes read position for next poll", () => {
+    const dir = makeTempDir();
+    const logPath = join(dir, "test.log");
+    writeFileSync(logPath, "03/10 1:00 PM│proj│main│🔧 tool call\n03/10 1:01 PM│proj│main│📖 read file\n");
+
+    const tailer = new LogTailer(logPath);
+    tailer.readAll(); // cursor moves to end
+
+    // poll returns nothing new
+    expect(tailer.poll()).toHaveLength(0);
+
+    // reset to beginning
+    tailer.resetOffset(0);
+
+    // poll now returns all entries again
+    const entries = tailer.poll();
+    expect(entries).toHaveLength(2);
+    expect(entries[0].eventType).toBe("tool");
+    expect(entries[1].eventType).toBe("read");
+  });
 });
 
 describe("readModelStats", () => {
