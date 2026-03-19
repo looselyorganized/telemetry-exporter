@@ -14,6 +14,7 @@ import {
   LogTailer,
   readModelStats,
   readStatsCache,
+  LOG_FILE,
   type LogEntry,
 } from "../src/parsers";
 import {
@@ -56,13 +57,29 @@ import { reportError, clearErrors } from "../src/errors";
 import { flushErrors, pruneResolved, clearErrorsTable } from "../src/db/errors";
 import { PID_FILE, isProcessRunning } from "../src/cli-output";
 import { RegistrationRetryTracker } from "../src/registration-retry";
-import { readFileSync, writeFileSync, existsSync, unlinkSync } from "fs";
+import { readFileSync, writeFileSync, existsSync, unlinkSync, mkdirSync } from "fs";
+import { join, dirname } from "path";
+import { fileURLToPath } from "url";
+import { initLocal, getLocal, closeLocal } from "../src/db/local";
+import { LogReceiver, TokenReceiver, MetricsReceiver } from "../src/pipeline/receivers";
+import { Processor } from "../src/pipeline/processor";
+import { Shipper } from "../src/pipeline/shipper";
 
 // ─── Config ────────────────────────────────────────────────────────────────
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_SECRET_KEY;
 const IS_BACKFILL = process.argv.includes("--backfill");
+
+// Per-target outbox pipeline flags. Enable new path first, then disable old path.
+// Brief dual-writing is safe due to upsert idempotency.
+const OUTBOX_ENABLED: Record<string, boolean> = {
+  events: true,
+  projects: true,
+  daily_metrics: true,
+  project_telemetry: true,
+  facility_metrics: true,
+};
 
 if (!SUPABASE_URL || !SUPABASE_KEY) {
   console.error("Missing SUPABASE_URL or SUPABASE_SECRET_KEY");
@@ -89,6 +106,7 @@ function removePidFile(): void {
 }
 
 function handleShutdown(): void {
+  try { closeLocal(); } catch {}  // checkpoint WAL
   removePidFile();
   process.exit(0);
 }
@@ -107,6 +125,14 @@ console.log(`  Mode: ${IS_BACKFILL ? "BACKFILL + daemon" : "daemon (incremental)
 console.log();
 
 initSupabase(SUPABASE_URL, SUPABASE_KEY);
+
+// Initialize SQLite outbox database
+const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
+const DB_DIR = join(REPO_ROOT, "data");
+const DB_PATH = join(DB_DIR, "telemetry.db");
+mkdirSync(DB_DIR, { recursive: true });
+initLocal(DB_PATH);
+console.log(`  SQLite: ${DB_PATH}`);
 
 // Clear live error state from previous runs
 clearErrors();
@@ -136,6 +162,17 @@ async function refreshResolver(): Promise<void> {
 function toProjId(dirName: string): string | null {
   return resolver.resolve(dirName)?.projId ?? null;
 }
+
+// ─── Pipeline stages ────────────────────────────────────────────────────────
+
+const logReceiver = new LogReceiver(LOG_FILE, DB_PATH);
+const tokenReceiver = new TokenReceiver(resolver);
+const metricsReceiver = new MetricsReceiver();
+const processor = new Processor(resolver, getLocal());
+const shipper = new Shipper(getLocal(), getSupabase());
+
+// Hydrate processor (load known projects from SQLite, baselines from Supabase)
+await processor.hydrate();
 
 // Cache project token totals for facility status updates
 let cachedTokensByProject: Record<string, number> = {};
@@ -407,24 +444,65 @@ async function backfill(): Promise<void> {
 // ─── Incremental sync ──────────────────────────────────────────────────────
 
 async function incrementalSync(): Promise<void> {
+  // === New pipeline path ===
+  try {
+    const pipelineEntries = logReceiver.poll();
+    if (pipelineEntries.length > 0 && OUTBOX_ENABLED.events) {
+      processor.processEvents(pipelineEntries);
+    }
+  } catch (err) {
+    reportError("receiver", `logReceiver: ${err instanceof Error ? err.message : String(err)}`);
+  }
+
+  try {
+    const tokenMap = tokenReceiver.poll();
+    if (OUTBOX_ENABLED.project_telemetry || OUTBOX_ENABLED.daily_metrics) {
+      processor.processTokens(tokenMap);
+    }
+  } catch (err) {
+    reportError("receiver", `tokenReceiver: ${err instanceof Error ? err.message : String(err)}`);
+  }
+
+  try {
+    const metrics = metricsReceiver.poll();
+    if (OUTBOX_ENABLED.facility_metrics) {
+      processor.processMetrics(metrics.statsCache, metrics.modelStats);
+    }
+  } catch (err) {
+    reportError("receiver", `metricsReceiver: ${err instanceof Error ? err.message : String(err)}`);
+  }
+
+  // Ship outbox → Supabase
+  const shipResult = await shipper.ship();
+  if (shipResult.shipped > 0 || shipResult.failed > 0) {
+    console.log(`  ${new Date().toLocaleTimeString()} — shipped ${shipResult.shipped} rows${shipResult.failed > 0 ? `, ${shipResult.failed} failed` : ""}`);
+  }
+
+  // === Old direct paths (only when outbox is disabled for the target) ===
   const newEntries = tailer.poll();
 
   if (newEntries.length > 0) {
     allSeenEntries.push(...newEntries);
-    await ensureProjects(newEntries);
+    if (!OUTBOX_ENABLED.projects) {
+      await ensureProjects(newEntries);
+    }
     cachedModelStats = readModelStats();
 
-    const { inserted, errors } = await insertAndTrackActivity(newEntries);
-    if (inserted > 0 || errors > 0) {
-      console.log(
-        `  ${new Date().toLocaleTimeString()} — ${inserted} events synced${errors > 0 ? `, ${errors} errors` : ""}`
-      );
+    if (!OUTBOX_ENABLED.events) {
+      const { inserted, errors } = await insertAndTrackActivity(newEntries);
+      if (inserted > 0 || errors > 0) {
+        console.log(
+          `  ${new Date().toLocaleTimeString()} — ${inserted} events synced${errors > 0 ? `, ${errors} errors` : ""}`
+        );
+      }
     }
   }
 
   // Sync aggregate metrics (tokens, sessions — NOT agent state)
-  const statsCache = readStatsCache();
-  await syncAggregateMetrics(statsCache, cachedModelStats);
+  if (!OUTBOX_ENABLED.facility_metrics) {
+    const statsCache = readStatsCache();
+    await syncAggregateMetrics(statsCache, cachedModelStats);
+  }
 }
 
 // ─── Facility status sync ──────────────────────────────────────────────────
@@ -637,45 +715,57 @@ async function gapBackfill(allEntries: LogEntry[]): Promise<void> {
     `  Found ${gapEntries.length} events in the gap (of ${allEntries.length} total)`
   );
 
-  if (gapEntries.length === 0) {
-    console.log("  No events to backfill, syncing metrics only...");
+  // === New pipeline path for gap backfill ===
+  if (OUTBOX_ENABLED.events) {
+    const statsCache = readStatsCache();
+    cachedModelStats = readModelStats();
+    const tokenMap = scanProjectTokens(resolver);
+    processor.processGapEntries(gapEntries, tokenMap, statsCache, cachedModelStats);
+    console.log(`  Gap backfill (pipeline): ${gapEntries.length} entries queued for shipping`);
+    // Shipper will drain on first aggregator cycle
+    allSeenEntries.push(...gapEntries);
   } else {
-    await ensureProjects(gapEntries);
+    // === Old direct path ===
+    if (gapEntries.length === 0) {
+      console.log("  No events to backfill, syncing metrics only...");
+    } else {
+      await ensureProjects(gapEntries);
 
-    const { inserted, errors } = await insertAndTrackActivity(gapEntries);
+      const { inserted, errors } = await insertAndTrackActivity(gapEntries);
+      console.log(
+        `  Gap backfill: ${inserted} events inserted${errors > 0 ? `, ${errors} errors` : ""}`
+      );
+
+      allSeenEntries.push(...gapEntries);
+    }
+
+    // Sync daily metrics (idempotent upserts — covers the full gap)
+    const statsCache = readStatsCache();
+    cachedModelStats = readModelStats();
+    if (statsCache) {
+      const synced = await syncDailyMetrics(statsCache);
+      console.log(`  Gap backfill: synced ${synced} daily metric rows`);
+    }
+
+    // Scan JSONL files for per-project tokens (full scan, idempotent)
+    const projectTokenMap = scanProjectTokens(resolver);
+    cachedTokensByProject = computeTokensByProject(projectTokenMap);
+    const projectEventAggregates = aggregateProjectEvents(allSeenEntries, toProjId);
+    const projectSynced = await syncProjectDailyMetrics(
+      projectTokenMap,
+      projectEventAggregates
+    );
     console.log(
-      `  Gap backfill: ${inserted} events inserted${errors > 0 ? `, ${errors} errors` : ""}`
+      `  Gap backfill: synced ${projectSynced} per-project daily metric rows`
     );
 
-    allSeenEntries.push(...gapEntries);
+    // Populate caches from daily_metrics (authoritative)
+    await refreshLifetimeCountersFromDb();
+    refreshTodayTokensCache(projectTokenMap, todayDateString());
+
+    // Update facility status with fresh data
+    await syncFacilityStatus(statsCache, cachedModelStats);
   }
-
-  // Sync daily metrics (idempotent upserts — covers the full gap)
-  const statsCache = readStatsCache();
-  cachedModelStats = readModelStats();
-  if (statsCache) {
-    const synced = await syncDailyMetrics(statsCache);
-    console.log(`  Gap backfill: synced ${synced} daily metric rows`);
-  }
-
-  // Scan JSONL files for per-project tokens (full scan, idempotent)
-  const projectTokenMap = scanProjectTokens(resolver);
-  cachedTokensByProject = computeTokensByProject(projectTokenMap);
-  const projectEventAggregates = aggregateProjectEvents(allSeenEntries, toProjId);
-  const projectSynced = await syncProjectDailyMetrics(
-    projectTokenMap,
-    projectEventAggregates
-  );
-  console.log(
-    `  Gap backfill: synced ${projectSynced} per-project daily metric rows`
-  );
-
-  // Populate caches from daily_metrics (authoritative)
-  await refreshLifetimeCountersFromDb();
-  refreshTodayTokensCache(projectTokenMap, todayDateString());
-
-  // Update facility status with fresh data
-  await syncFacilityStatus(statsCache, cachedModelStats);
 
   pruneSeenEntries();
   console.log("  Gap backfill complete.\n");
@@ -774,18 +864,41 @@ async function main(): Promise<void> {
       try {
         await incrementalSync();
 
+        // Archive shipping (every 12 cycles / ~60s)
+        if (cycleCount % 12 === 0 && cycleCount > 0) {
+          await shipper.shipArchive();
+        }
+
         // Periodic tasks every ~60 cycles (~5 minutes at 5s interval)
         if (cycleCount % 60 === 0 && cycleCount > 0) {
           const statsCache = readStatsCache();
           await refreshResolver();
-          await retryFailedRegistrations(cycleCount);
-          if (lastWrittenProjIds.length > 0) {
-            await verifyProjectTelemetry(lastWrittenUpdates, lastWrittenProjIds);
+
+          // Pipeline maintenance
+          if (OUTBOX_ENABLED.events) {
+            await processor.refreshResolver();
+            await processor.refreshBaselines();
+            shipper.pruneShipped(7);
+
+            const depth = shipper.outboxDepth();
+            if (depth > 1000) {
+              reportError("pipeline", `Outbox backlog: ${depth} pending rows`);
+            }
           }
-          await refreshProjectCachesFromDisk();
+
+          // Old-path periodic tasks (only when outbox is disabled for the target)
+          if (!OUTBOX_ENABLED.projects) {
+            await retryFailedRegistrations(cycleCount);
+          }
+          if (!OUTBOX_ENABLED.project_telemetry) {
+            if (lastWrittenProjIds.length > 0) {
+              await verifyProjectTelemetry(lastWrittenUpdates, lastWrittenProjIds);
+            }
+            await refreshProjectCachesFromDisk();
+          }
           const settled = await Promise.allSettled([
-            maybeSyncDailyMetrics(statsCache),
-            maybeSyncProjectDailyMetrics(),
+            !OUTBOX_ENABLED.daily_metrics ? maybeSyncDailyMetrics(statsCache) : Promise.resolve(),
+            !OUTBOX_ENABLED.daily_metrics ? maybeSyncProjectDailyMetrics() : Promise.resolve(),
             maybePruneEvents(),
           ]);
           for (const r of settled) {
