@@ -55,10 +55,12 @@ Shared Supabase tables have split ownership to prevent write conflicts:
 |-------|-------------|-------------|
 | `facility_status` | `active_agents`, `active_projects` | `tokens_*`, `sessions_*`, `messages_*`, `model_stats`, `hour_distribution`, `first_session_date` |
 
-> **Note:** `facility_status.status` is owned by neither loop -- it's set by `lo-open`/`lo-close` commands and the auto-close timer. The shipper must not write it.
+> **Note:** `facility_status.status` is set by `lo-open`/`lo-close` commands and by the watcher's auto-close timer (2h idle -> dormant). The shipper must not write it.
+
+> **Behavior change:** Today, `active_agents`/`active_projects` on `facility_status` are written by BOTH the watcher (on state change) and the aggregator (every 5s via `updateFacilityStatus`). After migration, only the watcher writes these fields. This means values are updated on state changes rather than every 5s. This is acceptable because the watcher ticks every 250ms and pushes immediately on change — the 5s aggregator write was always redundant when the watcher was running.
 | `project_telemetry` | `active_agents`, `agent_count` | `tokens_*`, `sessions_*`, `messages_*`, `tool_calls_*`, `agent_spawns_*`, `team_messages_*`, `models_today` |
 
-The shipper uses `method: "update"` (not upsert) for these tables and only writes its owned columns.
+The shipper strips agent-owned fields from payloads before writing. `project_telemetry` uses upsert (to create initial rows) but the payload only contains metrics-owned columns. `facility_status` uses update (singleton row already exists).
 
 ---
 
@@ -198,7 +200,7 @@ class Processor {
   processTokens(tokenMap: ProjectTokenMap): void
   processMetrics(statsCache, modelStats): void
   snapshotFacilityState(facilityState): void
-  processGapEntries(entries: LogEntry[], tokenMap: ProjectTokenMap): void
+  processGapEntries(entries: LogEntry[], tokenMap: ProjectTokenMap, statsCache, modelStats): void
   async refreshBaselines(): Promise<void>
   async refreshResolver(): Promise<void>
 }
@@ -220,7 +222,8 @@ Single SQLite transaction:
    - Insert into SQLite `known_projects`
    - Add to in-memory Set
 3. Enqueue each event to outbox (target: `events`)
-4. Enqueue each event to archive_queue (content_hash: SHA-256 of `projId|eventType|eventText|timestamp`)
+4. For each projId with events in this batch, enqueue a `project_activity` update to outbox (target: `projects`, payload includes `last_active` timestamp from the latest event). This preserves the current `updateProjectActivity()` behavior.
+5. Enqueue each event to archive_queue (content_hash: SHA-256 of `projId\0eventType\0eventText\0timestamp` — null byte separator avoids ambiguity from pipe characters in eventText)
 
 #### `processTokens(tokenMap)`
 
@@ -228,12 +231,14 @@ Single SQLite transaction:
 
 1. Compute `tokensByProject`, `todayTokensByProject`
 2. Compute per-project daily metric rows (date x project x model)
-3. Diff token totals against `tokenBaseline` -- only enqueue if changed
-4. Enqueue changed `daily_metrics` to outbox
-5. Enqueue changed `daily_metrics` to archive_queue (content_hash: `projId|date`)
-6. Enqueue `project_telemetry` updates to outbox (metrics fields only)
-7. Update `tokenBaseline` in memory
-8. Respect `lastDailySync` / `lastProjectSync` date guards for once-per-day operations
+3. Query event aggregation from outbox SQL (sessions, messages, tool_calls, agent_spawns, team_messages by project/date)
+4. Merge token data + event counts into complete `daily_metrics` payloads. Both sources must be present before enqueuing — a daily_metrics upsert will overwrite all columns, so partial payloads would destroy data from the other source.
+5. Diff token totals against `tokenBaseline` -- only enqueue if changed
+6. Enqueue changed `daily_metrics` to outbox
+7. Enqueue changed `daily_metrics` to archive_queue (content_hash: `projId\0date`)
+8. Enqueue `project_telemetry` updates to outbox (metrics fields only)
+9. Update `tokenBaseline` in memory to the newly computed values (NOT from Supabase — `refreshBaselines()` handles Supabase sync periodically for drift correction)
+10. Respect `lastDailySync` / `lastProjectSync` date guards for once-per-day operations
 
 #### `processMetrics(statsCache, modelStats)`
 
@@ -256,6 +261,18 @@ Called from the aggregator loop (never from the watcher):
 3. Hourly snapshots always fire regardless of throttle
 4. Enqueue to archive_queue (fact_type: `state_snapshot`, content_hash: `snapshot|rounded_timestamp`)
 
+#### `processGapEntries(entries, tokenMap, statsCache, modelStats)`
+
+Orchestrator calls this once at startup when a gap > 2 minutes is detected. It is a composition of the existing process methods, not a new algorithm:
+
+1. Filter `entries` to only those after the last known sync time
+2. Call `processEvents(gapEntries)` — registers projects, enqueues events
+3. Call `processTokens(tokenMap)` — full JSONL scan covers the gap period
+4. Call `processMetrics(statsCache, modelStats)` — idempotent facility/global metrics
+5. All data lands in the outbox; the shipper drains it on the first cycle
+
+This replaces the current `gapBackfill()` (daemon.ts lines 609-682) which did direct Supabase writes for the same data.
+
 #### Event Aggregation for Daily Metrics
 
 Instead of maintaining `allSeenEntries` in memory, the Processor queries the SQLite outbox:
@@ -268,8 +285,11 @@ SELECT
   COUNT(*) as count
 FROM outbox
 WHERE target = 'events'
+  AND created_at > date('now', '-31 days')
 GROUP BY project_id, event_type, date
 ```
+
+The 31-day filter matches the current `allSeenEntries` pruning window and ensures the query doesn't grow unbounded. Since shipped event rows are pruned after 7 days, the query primarily hits pending + recent shipped rows.
 
 This replaces the 31-day in-memory `allSeenEntries` array with a durable, queryable store.
 
@@ -333,9 +353,9 @@ const SHIPPING_STRATEGIES: Record<string, ShippingStrategy> = {
   },
   project_telemetry: {
     table: "project_telemetry",
-    method: "update",  // not upsert -- only writes metrics-owned fields
-    filterKey: "project_id",  // .eq("project_id", payload.project_id)
-    excludeFields: ["active_agents", "agent_count"],
+    method: "upsert",  // upsert to create initial rows; payload only contains metrics-owned fields
+    onConflict: "project_id",
+    excludeFields: ["active_agents", "agent_count"],  // stripped from payload before upsert
     batchSize: 50,
     fallbackToPerRow: true,
     priority: 4,
@@ -355,7 +375,7 @@ const SHIPPING_STRATEGIES: Record<string, ShippingStrategy> = {
 #### `ship()` Algorithm
 
 1. `SELECT * FROM outbox WHERE status = 'pending' AND (last_error_at IS NULL OR ...) ORDER BY id LIMIT 500`
-   - Backoff filter: skip rows where `now() - last_error_at < 2^min(retry_count, 6) seconds` (1s, 2s, 4s, 8s, 16s, 32s, 60s cap)
+   - Backoff filter: skip rows where `now() - last_error_at < min(2^retry_count, 60) seconds` (1s, 2s, 4s, 8s, 16s, 32s, 60s cap)
 2. Check circuit breaker. If open, return immediately.
 3. Group rows by target.
 4. Process targets in priority order (projects first, then events, etc.).
@@ -367,7 +387,7 @@ const SHIPPING_STRATEGIES: Record<string, ShippingStrategy> = {
    - **Permanent failure (4xx, FK violation)**: `UPDATE outbox SET status = 'failed', error = '...' WHERE id IN (...)`. Report to exporter_errors.
    - **Batch failure with fallbackToPerRow**: retry each row individually. For targets with `ignoreDuplicates: false`, per-row fallback uses conditional update (only write if payload timestamp is newer than existing row).
 6. After 10 failed retry attempts: `status = 'failed'`.
-7. Update circuit breaker state (3 consecutive 100% failure -> open for 60s).
+7. Update circuit breaker state machine: closed -> open (after 3 consecutive 100% failure cycles) -> half-open (after 60s timeout, allows 1 batch) -> closed (on success) / open (on failure).
 8. For singleton targets (`facility_metrics`): deduplicate pending rows, keep only the highest id.
 9. Return ShipResult.
 
@@ -544,6 +564,10 @@ GET /api/compare/projects -- known_projects in SQLite vs projects in Supabase
 }
 ```
 
+### SQLite Access from Dashboard
+
+The dashboard runs as a separate Bun process. SQLite WAL mode allows concurrent readers, so the dashboard can read while the daemon writes. If `data/telemetry.db` does not exist (daemon hasn't run yet), the outbox reader returns empty data with a clear status message rather than crashing.
+
 ### Migration Behavior
 
 During staged migration, both raw file reader and outbox reader exist. Each compare endpoint switches based on which targets are outbox-enabled. After all targets migrate, the raw file reader is removed.
@@ -599,7 +623,7 @@ Four staged PRs, each leaving the system fully functional.
 - When flag is on for a target: processor writes to outbox, shipper reads and ships
 - When flag is off: existing direct path unchanged
 - Migration order: events -> projects -> daily_metrics -> project_telemetry -> facility_metrics
-- Disable old direct path per target before enabling shipper for that target
+- Enable new shipper path first, THEN disable old direct path (brief dual-writing is safe due to upsert idempotency; reversing this order creates a data-loss window)
 - `facility_status.updated_at` set by both paths during migration, shipper always updates it
 
 ### Stage 3: Refactor Daemon into Orchestrator
