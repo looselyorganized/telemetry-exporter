@@ -1,12 +1,29 @@
 import { Database } from "bun:sqlite";
 import type { ProjectResolver } from "../project/resolver";
-import type { LogEntry } from "../parsers";
+import type { LogEntry, ModelStats, StatsCache } from "../parsers";
+import type { ProjectTokenMap } from "../project/scanner";
+import { computeTokensByProject } from "../project/scanner";
 import { enqueue, enqueueArchive, addKnownProject, getKnownProjectIds } from "../db/local";
+import { sumValues, formatModelStats, type LifetimeCounters } from "../../bin/daemon-helpers";
+
+// ─── SQL aggregation result shape ────────────────────────────────────────────
+
+interface EventAggRow {
+  project_id: string;
+  event_type: string;
+  date: string;
+  count: number;
+}
 
 export class Processor {
   private resolver: ProjectResolver;
   private db: Database;
   private knownProjects: Set<string>;
+  private tokenBaseline: Map<string, number> = new Map();
+  private lifetimeBaseline: Map<string, LifetimeCounters> = new Map();
+  private lastMetricsHash: string = "";
+  private lastDailySync: string = "";
+  private lastProjectSync: string = "";
 
   constructor(resolver: ProjectResolver, db: Database) {
     this.resolver = resolver;
@@ -78,6 +95,247 @@ export class Processor {
       for (const [projId, lastActive] of latestByProject) {
         enqueue("projects", { id: projId, last_active: lastActive });
       }
+    })();
+  }
+
+  /** Process token data: enqueue daily_metrics and project_telemetry updates. */
+  processTokens(tokenMap: ProjectTokenMap): void {
+    const today = new Date().toISOString().substring(0, 10);
+
+    // 1. Compute lifetime totals per project
+    const tokensByProject = computeTokensByProject(tokenMap);
+
+    // 2. Check baseline diff — skip entirely if nothing changed
+    let hasChanges = false;
+    for (const [projId, total] of Object.entries(tokensByProject)) {
+      if (this.tokenBaseline.get(projId) !== total) {
+        hasChanges = true;
+        break;
+      }
+    }
+    // Also check if a project was removed from baseline
+    if (!hasChanges) {
+      for (const projId of this.tokenBaseline.keys()) {
+        if (!(projId in tokensByProject)) {
+          hasChanges = true;
+          break;
+        }
+      }
+    }
+    if (!hasChanges) return;
+
+    // 3. Compute today's tokens per project per model
+    const todayTokensByProject: Record<string, { total: number; models: Record<string, number> }> = {};
+    for (const [projId, dateMap] of tokenMap) {
+      const todayModels = dateMap.get(today);
+      if (todayModels) {
+        let total = 0;
+        for (const t of Object.values(todayModels)) total += t;
+        todayTokensByProject[projId] = { total, models: { ...todayModels } };
+      }
+    }
+
+    // 4. Query event aggregation from outbox SQL
+    const eventAggRows = this.db
+      .query<EventAggRow, []>(
+        `SELECT
+          json_extract(payload, '$.project_id') as project_id,
+          json_extract(payload, '$.event_type') as event_type,
+          substr(json_extract(payload, '$.timestamp'), 1, 10) as date,
+          COUNT(*) as count
+        FROM outbox
+        WHERE target = 'events'
+          AND created_at > date('now', '-31 days')
+        GROUP BY project_id, event_type, date`
+      )
+      .all();
+
+    // Build event counts map: projId -> date -> { sessions, messages, tool_calls, agent_spawns, team_messages }
+    const eventCounts = new Map<string, Map<string, {
+      sessions: number; messages: number; tool_calls: number; agent_spawns: number; team_messages: number;
+    }>>();
+    for (const row of eventAggRows) {
+      if (!row.project_id || !row.date) continue;
+      let dateMap = eventCounts.get(row.project_id);
+      if (!dateMap) {
+        dateMap = new Map();
+        eventCounts.set(row.project_id, dateMap);
+      }
+      let counts = dateMap.get(row.date);
+      if (!counts) {
+        counts = { sessions: 0, messages: 0, tool_calls: 0, agent_spawns: 0, team_messages: 0 };
+        dateMap.set(row.date, counts);
+      }
+      switch (row.event_type) {
+        case "session_start":   counts.sessions += row.count; break;
+        case "response_finish": counts.messages += row.count; break;
+        case "tool":            counts.tool_calls += row.count; break;
+        case "agent_spawn":     counts.agent_spawns += row.count; break;
+        case "message":         counts.team_messages += row.count; break;
+      }
+    }
+
+    // Determine if this is a fresh daily sync (date guard)
+    const isNewDailySync = this.lastDailySync !== today;
+    const isNewProjectSync = this.lastProjectSync !== today;
+
+    this.db.transaction(() => {
+      // 5. Enqueue daily_metrics for each project/date
+      for (const [projId, dateMap] of tokenMap) {
+        for (const [date, models] of dateMap) {
+          // Date guard: only sync past dates on the first run of the day
+          if (date !== today && !isNewDailySync) continue;
+
+          const evCounts = eventCounts.get(projId)?.get(date);
+          const payload = {
+            date,
+            project_id: projId,
+            tokens: { ...models },
+            sessions: evCounts?.sessions ?? 0,
+            messages: evCounts?.messages ?? 0,
+            tool_calls: evCounts?.tool_calls ?? 0,
+            agent_spawns: evCounts?.agent_spawns ?? 0,
+            team_messages: evCounts?.team_messages ?? 0,
+          };
+          enqueue("daily_metrics", payload);
+
+          // Archive with content hash
+          const hashInput = `${projId}\0${date}`;
+          const hasher = new Bun.CryptoHasher("sha256");
+          hasher.update(hashInput);
+          const contentHash = hasher.digest("hex");
+          enqueueArchive("daily_metrics", JSON.stringify(payload), contentHash);
+        }
+      }
+
+      // 6. Compute lifetime event counters per project from event aggregation
+      const lifetimeCounters: Record<string, LifetimeCounters> = {};
+      for (const [projId, dateMap] of eventCounts) {
+        const counters: LifetimeCounters = {
+          sessions: 0, messages: 0, toolCalls: 0, agentSpawns: 0, teamMessages: 0,
+        };
+        for (const [, counts] of dateMap) {
+          counters.sessions += counts.sessions;
+          counters.messages += counts.messages;
+          counters.toolCalls += counts.tool_calls;
+          counters.agentSpawns += counts.agent_spawns;
+          counters.teamMessages += counts.team_messages;
+        }
+        lifetimeCounters[projId] = counters;
+      }
+
+      // 7. Enqueue project_telemetry for each project with changes
+      const allProjIds = new Set([
+        ...Object.keys(tokensByProject),
+        ...Object.keys(lifetimeCounters),
+        ...Object.keys(todayTokensByProject),
+      ]);
+
+      for (const projId of allProjIds) {
+        const todayData = todayTokensByProject[projId] ?? { total: 0, models: {} };
+        const counters = lifetimeCounters[projId] ?? {
+          sessions: 0, messages: 0, toolCalls: 0, agentSpawns: 0, teamMessages: 0,
+        };
+        enqueue("project_telemetry", {
+          project_id: projId,
+          tokens_lifetime: tokensByProject[projId] ?? 0,
+          tokens_today: todayData.total,
+          models_today: todayData.models,
+          sessions_lifetime: counters.sessions,
+          messages_lifetime: counters.messages,
+          tool_calls_lifetime: counters.toolCalls,
+          agent_spawns_lifetime: counters.agentSpawns,
+          team_messages_lifetime: counters.teamMessages,
+        });
+      }
+
+      // 8. Update baselines
+      this.tokenBaseline = new Map(Object.entries(tokensByProject));
+      this.lifetimeBaseline = new Map(Object.entries(lifetimeCounters));
+      this.lastDailySync = today;
+      this.lastProjectSync = today;
+    })();
+  }
+
+  /** Process facility-wide metrics: enqueue facility_metrics and global daily_metrics. */
+  processMetrics(statsCache: StatsCache | null, modelStats: ModelStats[]): void {
+    const today = new Date().toISOString().substring(0, 10);
+
+    // 1. Compute lifetime totals from baselines
+    let tokensLifetime = 0;
+    for (const total of this.tokenBaseline.values()) {
+      tokensLifetime += total;
+    }
+
+    let tokensToday = 0;
+    // Sum today's tokens from tokenBaseline is lifetime — we need today-only from daily.
+    // Use statsCache dailyModelTokens for today's tokens
+    if (statsCache?.dailyModelTokens) {
+      const todayEntry = statsCache.dailyModelTokens.find((d) => d.date === today);
+      if (todayEntry) {
+        for (const t of Object.values(todayEntry.tokensByModel)) {
+          tokensToday += t;
+        }
+      }
+    }
+
+    let sessionsLifetime = 0;
+    let messagesLifetime = 0;
+    for (const counters of this.lifetimeBaseline.values()) {
+      sessionsLifetime += counters.sessions;
+      messagesLifetime += counters.messages;
+    }
+
+    // 2. Build facility metrics
+    const facilityPayload = {
+      tokens_lifetime: tokensLifetime,
+      tokens_today: tokensToday,
+      sessions_lifetime: sessionsLifetime,
+      messages_lifetime: messagesLifetime,
+      model_stats: formatModelStats(modelStats),
+      hour_distribution: statsCache?.hourCounts ?? {},
+      first_session_date: statsCache?.firstSessionDate ?? null,
+    };
+
+    // 3. Build global daily_metrics rows (project_id IS NULL)
+    const globalDailyRows: Array<{
+      date: string; project_id: null;
+      tokens: Record<string, number>;
+      sessions: number; messages: number; tool_calls: number;
+    }> = [];
+    if (statsCache?.dailyActivity) {
+      for (const day of statsCache.dailyActivity) {
+        const modelTokens = statsCache.dailyModelTokens?.find((d) => d.date === day.date);
+        globalDailyRows.push({
+          date: day.date,
+          project_id: null,
+          tokens: modelTokens?.tokensByModel ?? {},
+          sessions: day.sessionCount,
+          messages: day.messageCount,
+          tool_calls: day.toolCallCount,
+        });
+      }
+    }
+
+    // 4. Hash to detect changes
+    const hashInput = JSON.stringify({ facilityPayload, globalDailyRows });
+    const hasher = new Bun.CryptoHasher("sha256");
+    hasher.update(hashInput);
+    const metricsHash = hasher.digest("hex");
+
+    if (metricsHash === this.lastMetricsHash) return;
+
+    this.db.transaction(() => {
+      // 5. Enqueue facility_metrics
+      enqueue("facility_metrics", facilityPayload);
+
+      // 6. Enqueue global daily_metrics
+      for (const row of globalDailyRows) {
+        enqueue("daily_metrics", row);
+      }
+
+      // 7. Update hash
+      this.lastMetricsHash = metricsHash;
     })();
   }
 }

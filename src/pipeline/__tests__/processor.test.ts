@@ -5,8 +5,9 @@ import { tmpdir } from "os";
 import { join } from "path";
 import { Processor } from "../processor";
 import { initLocal, getLocal } from "../../db/local";
-import type { LogEntry } from "../../parsers";
+import type { LogEntry, ModelStats, StatsCache } from "../../parsers";
 import type { ResolvedProject } from "../../project/resolver";
+import type { ProjectTokenMap } from "../../project/scanner";
 
 // ---------------------------------------------------------------------------
 // Mock ProjectResolver
@@ -324,5 +325,399 @@ describe("Processor.processEvents", () => {
     expect(eventRows).toHaveLength(1);
     const payload = JSON.parse(eventRows[0].payload);
     expect(payload.timestamp).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// processTokens / processMetrics helpers
+// ---------------------------------------------------------------------------
+
+/** Build a ProjectTokenMap from a simple descriptor. */
+function makeTokenMap(
+  data: Record<string, Record<string, Record<string, number>>>
+): ProjectTokenMap {
+  const map: ProjectTokenMap = new Map();
+  for (const [projId, dates] of Object.entries(data)) {
+    const dateMap = new Map<string, Record<string, number>>();
+    for (const [date, models] of Object.entries(dates)) {
+      dateMap.set(date, { ...models });
+    }
+    map.set(projId, dateMap);
+  }
+  return map;
+}
+
+/** Return today's date string in YYYY-MM-DD format. */
+function todayStr(): string {
+  return new Date().toISOString().substring(0, 10);
+}
+
+/** Seed outbox with event rows (so the SQL aggregation query has data). */
+function seedEventRows(
+  db: Database,
+  rows: Array<{ project_id: string; event_type: string; timestamp: string }>
+): void {
+  const now = new Date().toISOString();
+  for (const row of rows) {
+    db.query(
+      "INSERT INTO outbox (target, payload, status, created_at) VALUES (?, ?, 'pending', ?)"
+    ).run(
+      "events",
+      JSON.stringify(row),
+      now
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Processor.processTokens
+// ---------------------------------------------------------------------------
+
+describe("Processor.processTokens", () => {
+  test("enqueues daily_metrics rows to outbox when tokens change", () => {
+    const resolver = new MockResolver({});
+    const processor = new Processor(resolver as any, db);
+
+    const today = todayStr();
+    const tokenMap = makeTokenMap({
+      proj_abc123: { [today]: { "claude-opus-4-20250514": 5000 } },
+    });
+
+    processor.processTokens(tokenMap);
+
+    const rows = db
+      .query("SELECT * FROM outbox WHERE target = 'daily_metrics'")
+      .all() as any[];
+    expect(rows.length).toBeGreaterThanOrEqual(1);
+
+    const payload = JSON.parse(rows[0].payload);
+    expect(payload.project_id).toBe("proj_abc123");
+    expect(payload.date).toBe(today);
+    expect(payload.tokens["claude-opus-4-20250514"]).toBe(5000);
+  });
+
+  test("enqueues project_telemetry updates to outbox", () => {
+    const resolver = new MockResolver({});
+    const processor = new Processor(resolver as any, db);
+
+    const today = todayStr();
+    const tokenMap = makeTokenMap({
+      proj_abc123: { [today]: { "claude-opus-4-20250514": 5000 } },
+    });
+
+    processor.processTokens(tokenMap);
+
+    const rows = db
+      .query("SELECT * FROM outbox WHERE target = 'project_telemetry'")
+      .all() as any[];
+    expect(rows.length).toBeGreaterThanOrEqual(1);
+
+    const payload = JSON.parse(rows[0].payload);
+    expect(payload.project_id).toBe("proj_abc123");
+    expect(payload.tokens_lifetime).toBe(5000);
+    expect(payload.tokens_today).toBe(5000);
+    expect(payload.models_today["claude-opus-4-20250514"]).toBe(5000);
+  });
+
+  test("merges event counts from outbox SQL into daily_metrics payload", () => {
+    const resolver = new MockResolver({});
+    const processor = new Processor(resolver as any, db);
+
+    const today = todayStr();
+
+    // Seed event rows in outbox for aggregation
+    seedEventRows(db, [
+      { project_id: "proj_abc123", event_type: "session_start", timestamp: `${today}T10:00:00Z` },
+      { project_id: "proj_abc123", event_type: "tool", timestamp: `${today}T10:01:00Z` },
+      { project_id: "proj_abc123", event_type: "tool", timestamp: `${today}T10:02:00Z` },
+      { project_id: "proj_abc123", event_type: "response_finish", timestamp: `${today}T10:03:00Z` },
+      { project_id: "proj_abc123", event_type: "agent_spawn", timestamp: `${today}T10:04:00Z` },
+      { project_id: "proj_abc123", event_type: "message", timestamp: `${today}T10:05:00Z` },
+    ]);
+
+    const tokenMap = makeTokenMap({
+      proj_abc123: { [today]: { "claude-opus-4-20250514": 3000 } },
+    });
+
+    processor.processTokens(tokenMap);
+
+    const rows = db
+      .query("SELECT * FROM outbox WHERE target = 'daily_metrics'")
+      .all() as any[];
+
+    const metricsRow = rows.find((r: any) => {
+      const p = JSON.parse(r.payload);
+      return p.project_id === "proj_abc123" && p.date === today;
+    })!;
+    expect(metricsRow).toBeTruthy();
+
+    const payload = JSON.parse(metricsRow.payload);
+    expect(payload.sessions).toBe(1);
+    expect(payload.messages).toBe(1);
+    expect(payload.tool_calls).toBe(2);
+    expect(payload.agent_spawns).toBe(1);
+    expect(payload.team_messages).toBe(1);
+  });
+
+  test("skips enqueue when token baseline hasn't changed", () => {
+    const resolver = new MockResolver({});
+    const processor = new Processor(resolver as any, db);
+
+    const today = todayStr();
+    const tokenMap = makeTokenMap({
+      proj_abc123: { [today]: { "claude-opus-4-20250514": 5000 } },
+    });
+
+    // First call — should enqueue
+    processor.processTokens(tokenMap);
+    const countAfterFirst = (
+      db.query("SELECT COUNT(*) as c FROM outbox WHERE target = 'daily_metrics'").get() as any
+    ).c;
+
+    // Second call with same data — should skip
+    processor.processTokens(tokenMap);
+    const countAfterSecond = (
+      db.query("SELECT COUNT(*) as c FROM outbox WHERE target = 'daily_metrics'").get() as any
+    ).c;
+
+    expect(countAfterSecond).toBe(countAfterFirst);
+  });
+
+  test("updates tokenBaseline after processing", () => {
+    const resolver = new MockResolver({});
+    const processor = new Processor(resolver as any, db);
+
+    const today = todayStr();
+    const tokenMap1 = makeTokenMap({
+      proj_abc123: { [today]: { "claude-opus-4-20250514": 5000 } },
+    });
+
+    processor.processTokens(tokenMap1);
+    const countAfterFirst = (
+      db.query("SELECT COUNT(*) as c FROM outbox WHERE target = 'daily_metrics'").get() as any
+    ).c;
+
+    // Change the token data — should trigger new enqueue
+    const tokenMap2 = makeTokenMap({
+      proj_abc123: { [today]: { "claude-opus-4-20250514": 8000 } },
+    });
+
+    processor.processTokens(tokenMap2);
+    const countAfterSecond = (
+      db.query("SELECT COUNT(*) as c FROM outbox WHERE target = 'daily_metrics'").get() as any
+    ).c;
+
+    expect(countAfterSecond).toBeGreaterThan(countAfterFirst);
+  });
+
+  test("enqueues to archive_queue with content hash", () => {
+    const resolver = new MockResolver({});
+    const processor = new Processor(resolver as any, db);
+
+    const today = todayStr();
+    const tokenMap = makeTokenMap({
+      proj_abc123: { [today]: { "claude-opus-4-20250514": 5000 } },
+    });
+
+    processor.processTokens(tokenMap);
+
+    const archiveRows = db
+      .query("SELECT * FROM archive_queue WHERE fact_type = 'daily_metrics'")
+      .all() as any[];
+    expect(archiveRows.length).toBeGreaterThanOrEqual(1);
+    expect(archiveRows[0].content_hash).toBeTruthy();
+    expect(archiveRows[0].content_hash).toHaveLength(64);
+  });
+
+  test("respects date guard (only runs full daily sync once per day)", () => {
+    const resolver = new MockResolver({});
+    const processor = new Processor(resolver as any, db);
+
+    const today = todayStr();
+    const yesterday = new Date(Date.now() - 86400000).toISOString().substring(0, 10);
+
+    const tokenMap = makeTokenMap({
+      proj_abc123: {
+        [yesterday]: { "claude-opus-4-20250514": 3000 },
+        [today]: { "claude-opus-4-20250514": 5000 },
+      },
+    });
+
+    // First call — processes all dates
+    processor.processTokens(tokenMap);
+    const dailyRowsFirst = db
+      .query("SELECT * FROM outbox WHERE target = 'daily_metrics'")
+      .all() as any[];
+
+    // Find rows for yesterday
+    const yesterdayRowsFirst = dailyRowsFirst.filter((r: any) => {
+      const p = JSON.parse(r.payload);
+      return p.date === yesterday;
+    });
+    expect(yesterdayRowsFirst.length).toBeGreaterThanOrEqual(1);
+
+    // Wipe baselines to force re-processing of today (simulate token change)
+    const tokenMap2 = makeTokenMap({
+      proj_abc123: {
+        [yesterday]: { "claude-opus-4-20250514": 3000 },
+        [today]: { "claude-opus-4-20250514": 9000 },
+      },
+    });
+
+    // Second call same day — should still process today but NOT re-process past dates
+    processor.processTokens(tokenMap2);
+
+    // The date guard prevents past-date daily_metrics from being re-synced
+    const dailyRowsSecond = db
+      .query("SELECT * FROM outbox WHERE target = 'daily_metrics'")
+      .all() as any[];
+    const yesterdayRowsSecond = dailyRowsSecond.filter((r: any) => {
+      const p = JSON.parse(r.payload);
+      return p.date === yesterday;
+    });
+
+    // Yesterday rows should NOT increase on the second call
+    expect(yesterdayRowsSecond.length).toBe(yesterdayRowsFirst.length);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Processor.processMetrics
+// ---------------------------------------------------------------------------
+
+describe("Processor.processMetrics", () => {
+  test("enqueues facility_metrics to outbox", () => {
+    const resolver = new MockResolver({});
+    const processor = new Processor(resolver as any, db);
+
+    const statsCache: StatsCache = {
+      dailyActivity: [],
+      dailyModelTokens: [],
+      modelUsage: {},
+      totalSessions: 10,
+      totalMessages: 50,
+      firstSessionDate: "2025-01-01",
+      hourCounts: { "10": 5, "14": 8 },
+    };
+    const modelStats: ModelStats[] = [
+      { model: "claude-opus-4-20250514", total: 100000, input: 60000, cacheWrite: 10000, cacheRead: 20000, output: 10000 },
+    ];
+
+    processor.processMetrics(statsCache, modelStats);
+
+    const rows = db
+      .query("SELECT * FROM outbox WHERE target = 'facility_metrics'")
+      .all() as any[];
+    expect(rows).toHaveLength(1);
+
+    const payload = JSON.parse(rows[0].payload);
+    expect(payload.first_session_date).toBe("2025-01-01");
+    expect(payload.hour_distribution).toEqual({ "10": 5, "14": 8 });
+  });
+
+  test("enqueues global daily_metrics to outbox", () => {
+    const resolver = new MockResolver({});
+    const processor = new Processor(resolver as any, db);
+
+    const today = todayStr();
+    const statsCache: StatsCache = {
+      dailyActivity: [
+        { date: today, messageCount: 5, sessionCount: 2, toolCallCount: 12 },
+      ],
+      dailyModelTokens: [
+        { date: today, tokensByModel: { "claude-opus-4-20250514": 8000 } },
+      ],
+      modelUsage: {},
+      totalSessions: 10,
+      totalMessages: 50,
+      firstSessionDate: "2025-01-01",
+      hourCounts: {},
+    };
+    const modelStats: ModelStats[] = [];
+
+    processor.processMetrics(statsCache, modelStats);
+
+    const rows = db
+      .query("SELECT * FROM outbox WHERE target = 'daily_metrics'")
+      .all() as any[];
+
+    // Should have at least one global (null project_id) daily_metrics row
+    const globalRows = rows.filter((r: any) => {
+      const p = JSON.parse(r.payload);
+      return p.project_id === null;
+    });
+    expect(globalRows.length).toBeGreaterThanOrEqual(1);
+  });
+
+  test("skips enqueue when metrics hash hasn't changed", () => {
+    const resolver = new MockResolver({});
+    const processor = new Processor(resolver as any, db);
+
+    const statsCache: StatsCache = {
+      dailyActivity: [],
+      dailyModelTokens: [],
+      modelUsage: {},
+      totalSessions: 10,
+      totalMessages: 50,
+      firstSessionDate: "2025-01-01",
+      hourCounts: {},
+    };
+    const modelStats: ModelStats[] = [];
+
+    // First call
+    processor.processMetrics(statsCache, modelStats);
+    const countFirst = (
+      db.query("SELECT COUNT(*) as c FROM outbox WHERE target = 'facility_metrics'").get() as any
+    ).c;
+
+    // Second call with identical data — should skip
+    processor.processMetrics(statsCache, modelStats);
+    const countSecond = (
+      db.query("SELECT COUNT(*) as c FROM outbox WHERE target = 'facility_metrics'").get() as any
+    ).c;
+
+    expect(countSecond).toBe(countFirst);
+  });
+
+  test("uses formatModelStats for model_stats field", () => {
+    const resolver = new MockResolver({});
+    const processor = new Processor(resolver as any, db);
+
+    const statsCache: StatsCache = {
+      dailyActivity: [],
+      dailyModelTokens: [],
+      modelUsage: {},
+      totalSessions: 5,
+      totalMessages: 20,
+      firstSessionDate: "2025-06-01",
+      hourCounts: {},
+    };
+    const modelStats: ModelStats[] = [
+      { model: "claude-opus-4-20250514", total: 50000, input: 30000, cacheWrite: 5000, cacheRead: 10000, output: 5000 },
+      { model: "claude-sonnet-4-20250514", total: 20000, input: 10000, cacheWrite: 3000, cacheRead: 4000, output: 3000 },
+    ];
+
+    processor.processMetrics(statsCache, modelStats);
+
+    const rows = db
+      .query("SELECT * FROM outbox WHERE target = 'facility_metrics'")
+      .all() as any[];
+    expect(rows).toHaveLength(1);
+
+    const payload = JSON.parse(rows[0].payload);
+    expect(payload.model_stats["claude-opus-4-20250514"]).toEqual({
+      total: 50000,
+      input: 30000,
+      cacheWrite: 5000,
+      cacheRead: 10000,
+      output: 5000,
+    });
+    expect(payload.model_stats["claude-sonnet-4-20250514"]).toEqual({
+      total: 20000,
+      input: 10000,
+      cacheWrite: 3000,
+      cacheRead: 4000,
+      output: 3000,
+    });
   });
 });
