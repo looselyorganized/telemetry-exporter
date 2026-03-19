@@ -3,14 +3,17 @@
  * Telemetry Verification Dashboard
  *
  * Bun HTTP server that serves a self-contained HTML dashboard comparing
- * local telemetry data with what's stored in Supabase.
+ * outbox data with what's stored in Supabase.
  *
  * Usage: bun run bin/dashboard.ts
  * Default port: 7777
  */
 
+import { join, dirname } from "path";
+import { fileURLToPath } from "url";
+import { readFileSync, existsSync } from "fs";
 import { createClient } from "@supabase/supabase-js";
-import { readAllLocal, type LocalData } from "../src/verify/local-reader";
+import { readFromOutbox, readOutboxHealth, type OutboxData } from "../src/verify/outbox-reader";
 import { readAllRemote, type RemoteData } from "../src/verify/remote-reader";
 import {
   compareEvents,
@@ -19,9 +22,9 @@ import {
   compareModels,
   compareProjects,
   buildHealth,
+  type LocalData,
 } from "../src/verify/comparator";
-import { loadEnv } from "../src/cli-output";
-import { ProjectResolver } from "../src/project/resolver";
+import { loadEnv, PID_FILE, isProcessRunning } from "../src/cli-output";
 
 // ─── Config ─────────────────────────────────────────────────────────────────
 
@@ -31,30 +34,79 @@ const supabase = createClient(url, key, {
   auth: { persistSession: false, autoRefreshToken: false },
 });
 
+const DB_PATH = join(dirname(fileURLToPath(import.meta.url)), "..", "data", "telemetry.db");
+
+// ─── Adapter: OutboxData → LocalData ────────────────────────────────────────
+//
+// The comparator expects LocalData shape. We map OutboxData fields to match.
+// Fields not tracked by the outbox (metrics, models, hourDistribution) return
+// empty stubs so comparisons gracefully show "no data" rather than crashing.
+
+function outboxToLocalData(outbox: OutboxData): LocalData {
+  // events: outbox has projId → count (flat); comparator expects byProjectDate
+  // We store the flat count under a synthetic date key "__all__" so the
+  // comparator collapses it back to a per-project total correctly.
+  const byProjectDate: Record<string, Record<string, number>> = {};
+  for (const [projId, count] of Object.entries(outbox.events)) {
+    byProjectDate[projId] = { __all__: count };
+  }
+
+  // tokens: outbox has projId → number, matches LocalData.tokens.byProject
+  const tokensByProject: Record<string, number> = { ...outbox.tokens };
+
+  // projects: outbox has { id, slug }; LocalData.projects has { dirName, slug, projId }
+  const projects = outbox.projects.map((p) => ({
+    dirName: p.slug,
+    slug: p.slug,
+    projId: p.id,
+  }));
+
+  // daemon status from PID file (same as old reader)
+  let daemon: LocalData["daemon"] = { running: false, pid: null };
+  if (existsSync(PID_FILE)) {
+    try {
+      const pid = parseInt(readFileSync(PID_FILE, "utf-8").trim(), 10);
+      if (!isNaN(pid)) {
+        daemon = { running: isProcessRunning(pid), pid };
+      }
+    } catch {
+      // leave as stopped
+    }
+  }
+
+  return {
+    events: { byProjectDate, totalCount: outbox.available ? Object.values(outbox.events).reduce((a, b) => a + b, 0) : 0 },
+    metrics: { dailyActivity: [] },
+    tokens: { byProject: tokensByProject },
+    models: { stats: [] },
+    projects,
+    hourDistribution: {},
+    daemon,
+    logStartDate: null,
+  };
+}
+
 // ─── Snapshot cache (coalesces concurrent requests) ─────────────────────────
 
-let cachedSnapshot: { local: LocalData; remote: RemoteData; slugMap: Record<string, string>; ts: number } | null = null;
+let cachedSnapshot: { local: LocalData; outbox: OutboxData; remote: RemoteData; slugMap: Record<string, string>; ts: number } | null = null;
 const CACHE_TTL = 5_000;
 
-async function getSnapshot(): Promise<{ local: LocalData; remote: RemoteData }> {
+async function getSnapshot(): Promise<{ local: LocalData; outbox: OutboxData; remote: RemoteData; slugMap: Record<string, string> }> {
   if (cachedSnapshot && Date.now() - cachedSnapshot.ts < CACHE_TTL) {
     return cachedSnapshot;
   }
 
-  // Single resolver handles disk + Supabase local_names + org-root + legacy
-  const resolver = new ProjectResolver();
-  await resolver.refresh();
-
-  const local = readAllLocal(resolver);
-  const remote = await readAllRemote(supabase, local.logStartDate ?? undefined);
+  const outbox = readFromOutbox(DB_PATH);
+  const local = outboxToLocalData(outbox);
+  const remote = await readAllRemote(supabase);
 
   // Build projId → slug lookup for dashboard display
   const slugMap: Record<string, string> = {};
-  for (const [, resolved] of resolver.entries()) {
-    slugMap[resolved.projId] = resolved.slug;
+  for (const proj of outbox.projects) {
+    slugMap[proj.id] = proj.slug;
   }
 
-  cachedSnapshot = { local, remote, slugMap, ts: Date.now() };
+  cachedSnapshot = { local, outbox, remote, slugMap, ts: Date.now() };
   return cachedSnapshot;
 }
 
@@ -69,7 +121,27 @@ async function handleHealth(): Promise<Response> {
     .select("*", { count: "exact", head: true });
 
   if (countError) return Response.json({ error: countError.message }, { status: 500 });
-  return Response.json({ ...health, errorCount: count ?? 0 });
+
+  // Add pipeline status from outbox health
+  const outboxHealth = readOutboxHealth(DB_PATH);
+  const oldestPending = (() => {
+    if (!outboxHealth.failedRows.length && outboxHealth.depth.pending === 0) return null;
+    // failedRows are sorted by id ascending; oldest is first
+    return outboxHealth.failedRows[0]?.createdAt ?? null;
+  })();
+
+  const pipeline = {
+    outboxDepth: outboxHealth.depth.pending,
+    archiveDepth: outboxHealth.archive.pending,
+    oldestPending,
+  };
+
+  return Response.json({ ...health, errorCount: count ?? 0, pipeline });
+}
+
+async function handleOutbox(): Promise<Response> {
+  const health = readOutboxHealth(DB_PATH);
+  return Response.json(health);
 }
 
 async function handleErrors(): Promise<Response> {
@@ -309,7 +381,35 @@ function dashboardHtml(): string {
     text-align: center;
     font-size: 13px;
   }
-  @media (max-width: 700px) { .comparison { grid-template-columns: 1fr; } }
+  .outbox-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+  .outbox-card {
+    border: 1px dashed #282828;
+    padding: 12px;
+  }
+  .outbox-card-title {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: #666;
+    margin-bottom: 8px;
+  }
+  .outbox-stat {
+    display: flex;
+    justify-content: space-between;
+    font-size: 12px;
+    padding: 2px 0;
+  }
+  .outbox-stat-key { color: #888; }
+  .outbox-stat-val { color: #e0e0e0; }
+  .outbox-stat-val.zero { color: #444; }
+  .outbox-stat-val.nonzero-fail { color: #ff5050; }
+  .outbox-stat-val.nonzero-pend { color: #ffc850; }
+  @media (max-width: 700px) { .comparison { grid-template-columns: 1fr; } .outbox-grid { grid-template-columns: 1fr; } }
 </style>
 </head>
 <body>
@@ -331,6 +431,10 @@ function dashboardHtml(): string {
     <span>Supabase: <span id="supabase-status">...</span></span>
   </div>
   <div class="health-item">
+    <span class="dot" id="pipeline-dot"></span>
+    <span>Pipeline: <span id="pipeline-status">...</span></span>
+  </div>
+  <div class="health-item">
     <span class="dot" id="errors-dot"></span>
     <span>Errors: <span id="errors-status">...</span></span>
   </div>
@@ -345,6 +449,7 @@ function dashboardHtml(): string {
   <button class="tab" data-tab="tokens">Tokens</button>
   <button class="tab" data-tab="models">Models</button>
   <button class="tab" data-tab="projects">Projects</button>
+  <button class="tab" data-tab="outbox">Outbox</button>
   <button class="tab" data-tab="errors">Errors</button>
 </div>
 
@@ -353,6 +458,7 @@ function dashboardHtml(): string {
 <div class="panel" id="panel-tokens"><p class="loading">Loading...</p></div>
 <div class="panel" id="panel-models"><p class="loading">Loading...</p></div>
 <div class="panel" id="panel-projects"><p class="loading">Loading...</p></div>
+<div class="panel" id="panel-outbox"><p class="loading">Loading...</p></div>
 <div class="panel" id="panel-errors"><p class="loading">Loading...</p></div>
 
 <script>
@@ -382,7 +488,7 @@ function el(tag, cls, text) {
 }
 
 function displayKey(key, slugMap) {
-  if (slugMap && slugMap[key]) return slugMap[key] + ' (' + key.slice(0, 13) + '…)';
+  if (slugMap && slugMap[key]) return slugMap[key] + ' (' + key.slice(0, 13) + '\\u2026)';
   return key;
 }
 
@@ -442,7 +548,7 @@ function renderComparison(panel, result) {
 
   var slugMap = result.slugMap || {};
   var grid = el('div', 'comparison');
-  grid.appendChild(buildSide('LOCAL', result.local, result.remote, discMap, false, slugMap));
+  grid.appendChild(buildSide('OUTBOX', result.local, result.remote, discMap, false, slugMap));
   grid.appendChild(buildSide('SUPABASE', result.local, result.remote, discMap, true, slugMap));
   panel.appendChild(grid);
 
@@ -459,7 +565,7 @@ function renderComparison(panel, result) {
       var row = el('div', 'disc-row');
       row.appendChild(el('span', 'badge ' + d.severity, d.severity));
       row.appendChild(el('span', 'row-key', displayKey(d.key, slugMap)));
-      var detail = 'local: ' + formatNum(d.local) + ' / remote: ' + formatNum(d.remote) +
+      var detail = 'outbox: ' + formatNum(d.local) + ' / remote: ' + formatNum(d.remote) +
         ' (diff: ' + (d.diff > 0 ? '+' : '') + formatNum(d.diff) + ', ' + (d.pctDiff * 100).toFixed(1) + '%)';
       row.appendChild(el('span', '', detail));
       panel.appendChild(row);
@@ -494,6 +600,23 @@ function fetchHealth() {
       supaDot.className = 'dot ' + (h.supabase.connected ? 'green' : 'red');
       supaStatus.textContent = h.supabase.connected ? 'connected (' + h.supabase.latencyMs + 'ms)' : 'disconnected';
 
+      var pipelineDot = document.getElementById('pipeline-dot');
+      var pipelineStatus = document.getElementById('pipeline-status');
+      if (h.pipeline) {
+        var depth = h.pipeline.outboxDepth || 0;
+        var archiveDepth = h.pipeline.archiveDepth || 0;
+        if (depth === 0 && archiveDepth === 0) {
+          pipelineDot.className = 'dot green';
+          pipelineStatus.textContent = 'clear';
+        } else {
+          pipelineDot.className = 'dot yellow';
+          pipelineStatus.textContent = depth + ' pending, ' + archiveDepth + ' archive';
+        }
+      } else {
+        pipelineDot.className = 'dot yellow';
+        pipelineStatus.textContent = 'no db';
+      }
+
       var errorsDot = document.getElementById('errors-dot');
       var errorsStatus = document.getElementById('errors-status');
       errorsDot.className = 'dot ' + (h.errorCount > 0 ? 'red' : 'green');
@@ -504,7 +627,100 @@ function fetchHealth() {
     .catch(function() {
       document.getElementById('daemon-dot').className = 'dot yellow';
       document.getElementById('supabase-dot').className = 'dot yellow';
+      document.getElementById('pipeline-dot').className = 'dot yellow';
     });
+}
+
+function renderOutbox(panel, data) {
+  while (panel.firstChild) panel.removeChild(panel.firstChild);
+
+  var grid = el('div', 'outbox-grid');
+
+  // Depth card
+  var depthCard = el('div', 'outbox-card');
+  depthCard.appendChild(el('div', 'outbox-card-title', 'Outbox Depth'));
+  [['Pending', data.depth.pending, 'nonzero-pend'], ['Shipped', data.depth.shipped, ''], ['Failed', data.depth.failed, 'nonzero-fail']].forEach(function(item) {
+    var row = el('div', 'outbox-stat');
+    row.appendChild(el('span', 'outbox-stat-key', item[0]));
+    var val = item[1];
+    var extraCls = val === 0 ? 'zero' : (item[2] || '');
+    row.appendChild(el('span', 'outbox-stat-val ' + extraCls, formatNum(val)));
+    depthCard.appendChild(row);
+  });
+  grid.appendChild(depthCard);
+
+  // Archive card
+  var archCard = el('div', 'outbox-card');
+  archCard.appendChild(el('div', 'outbox-card-title', 'Archive Queue'));
+  [['Pending', data.archive.pending, 'nonzero-pend'], ['Shipped', data.archive.shipped, '']].forEach(function(item) {
+    var row = el('div', 'outbox-stat');
+    row.appendChild(el('span', 'outbox-stat-key', item[0]));
+    var val = item[1];
+    var extraCls = val === 0 ? 'zero' : (item[2] || '');
+    row.appendChild(el('span', 'outbox-stat-val ' + extraCls, formatNum(val)));
+    archCard.appendChild(row);
+  });
+  grid.appendChild(archCard);
+
+  // Cursors card
+  var cursorCard = el('div', 'outbox-card');
+  cursorCard.appendChild(el('div', 'outbox-card-title', 'Cursors'));
+  var cursorKeys = Object.keys(data.cursors);
+  if (cursorKeys.length === 0) {
+    cursorCard.appendChild(el('div', 'outbox-stat-key', 'No cursors'));
+  } else {
+    cursorKeys.forEach(function(src) {
+      var row = el('div', 'outbox-stat');
+      row.appendChild(el('span', 'outbox-stat-key', src));
+      row.appendChild(el('span', 'outbox-stat-val', formatNum(data.cursors[src].offset)));
+      cursorCard.appendChild(row);
+    });
+  }
+  grid.appendChild(cursorCard);
+
+  panel.appendChild(grid);
+
+  // Per-target breakdown
+  var targets = Object.keys(data.byTarget).sort();
+  if (targets.length > 0) {
+    panel.appendChild(el('div', 'disc-title', 'By Target'));
+    var tgrid = el('div', 'outbox-grid');
+    targets.forEach(function(target) {
+      var t = data.byTarget[target];
+      var card = el('div', 'outbox-card');
+      card.appendChild(el('div', 'outbox-card-title', target));
+      [['Pending', t.pending, 'nonzero-pend'], ['Shipped', t.shipped, ''], ['Failed', t.failed, 'nonzero-fail']].forEach(function(item) {
+        var row = el('div', 'outbox-stat');
+        row.appendChild(el('span', 'outbox-stat-key', item[0]));
+        var val = item[1];
+        var extraCls = val === 0 ? 'zero' : (item[2] || '');
+        row.appendChild(el('span', 'outbox-stat-val ' + extraCls, formatNum(val)));
+        card.appendChild(row);
+      });
+      tgrid.appendChild(card);
+    });
+    panel.appendChild(tgrid);
+  }
+
+  // Failed rows
+  if (data.failedRows && data.failedRows.length > 0) {
+    panel.appendChild(el('div', 'disc-title', 'Failed Rows'));
+    data.failedRows.forEach(function(row) {
+      var rowEl = el('div', 'disc-row');
+      rowEl.appendChild(el('span', 'badge error', 'failed'));
+      rowEl.appendChild(el('span', 'row-key', '#' + row.id + ' ' + row.target));
+      rowEl.appendChild(el('span', 'dim', row.error));
+      panel.appendChild(rowEl);
+    });
+  }
+}
+
+function fetchOutbox() {
+  var panel = document.getElementById('panel-outbox');
+  return fetch('/api/outbox')
+    .then(function(res) { return res.json(); })
+    .then(function(data) { renderOutbox(panel, data); })
+    .catch(function(err) { showError(panel, err.message); });
 }
 
 function renderErrors(panel, data) {
@@ -586,6 +802,7 @@ function refreshAll() {
     fetchPanel('tokens'),
     fetchPanel('models'),
     fetchPanel('projects'),
+    fetchOutbox(),
     fetchErrors()
   ]).then(function() {
     var dur = Date.now() - start;
@@ -623,6 +840,10 @@ const server = Bun.serve({
 
       if (path === "/api/health") {
         return await handleHealth();
+      }
+
+      if (path === "/api/outbox") {
+        return await handleOutbox();
       }
 
       if (path === "/api/errors") {
