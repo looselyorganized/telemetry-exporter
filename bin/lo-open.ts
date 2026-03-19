@@ -307,7 +307,7 @@ async function checkTelemetry(
 }
 
 async function launchDashboard(): Promise<void> {
-  // Kill any existing dashboard process
+  // Kill any existing dashboard process (PID file or port holder)
   if (existsSync(DASHBOARD_PID_FILE)) {
     const oldPid = parseInt(readFileSync(DASHBOARD_PID_FILE, "utf-8").trim(), 10);
     if (!isNaN(oldPid) && isProcessRunning(oldPid)) {
@@ -318,6 +318,16 @@ async function launchDashboard(): Promise<void> {
     }
     try { unlinkSync(DASHBOARD_PID_FILE); } catch {}
   }
+
+  // Also kill anything holding port 7777 (stale process without PID file)
+  try {
+    const result = await $`lsof -ti :7777`.quiet();
+    const pids = result.stdout.toString().trim().split("\n").filter(Boolean);
+    for (const p of pids) {
+      try { process.kill(parseInt(p, 10), "SIGTERM"); } catch {}
+    }
+    if (pids.length > 0) await Bun.sleep(500);
+  } catch {}  // lsof returns non-zero if nothing found
 
   // Spawn dashboard as a detached background process
   const dashboardScript = join(EXPORTER_DIR, "bin", "dashboard.ts");
