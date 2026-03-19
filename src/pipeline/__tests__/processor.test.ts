@@ -614,6 +614,7 @@ describe("Processor.processMetrics", () => {
     const payload = JSON.parse(rows[0].payload);
     expect(payload.first_session_date).toBe("2025-01-01");
     expect(payload.hour_distribution).toEqual({ "10": 5, "14": 8 });
+    expect(payload.updated_at).toMatch(/^\d{4}-\d{2}-\d{2}T/);
   });
 
   test("enqueues global daily_metrics to outbox", () => {
