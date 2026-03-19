@@ -10,6 +10,7 @@ import {
   dequeueUnshippedArchive,
   markArchiveShipped,
   pruneShipped as pruneShippedLocal,
+  pruneShippedArchive as pruneShippedArchiveLocal,
   outboxDepth as outboxDepthLocal,
   archiveDepth as archiveDepthLocal,
 } from "../db/local";
@@ -420,7 +421,7 @@ export class Shipper {
 
     const resp = await (this.supabase
       .from("outbox_archive")
-      .upsert(payloads, { onConflict: "content_hash", ignoreDuplicates: true }) as Promise<{ data?: any; error?: any; status?: number }>);
+      .upsert(payloads, { onConflict: "fact_type,content_hash", ignoreDuplicates: true }) as Promise<{ data?: any; error?: any; status?: number }>);
 
     if (!resp.error) {
       markArchiveShipped(ids);
@@ -442,6 +443,10 @@ export class Shipper {
 
   pruneShipped(days: number): void {
     pruneShippedLocal(days);
+  }
+
+  pruneShippedArchive(days: number): void {
+    pruneShippedArchiveLocal(days);
   }
 
   outboxDepth(): number {

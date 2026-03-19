@@ -411,6 +411,7 @@ export class Processor {
       model_stats: formatModelStats(modelStats),
       hour_distribution: statsCache?.hourCounts ?? {},
       first_session_date: statsCache?.firstSessionDate ?? null,
+      updated_at: new Date().toISOString(),
     };
 
     // 3. Build global daily_metrics rows (project_id IS NULL)

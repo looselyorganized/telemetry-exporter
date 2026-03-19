@@ -236,8 +236,12 @@ async function pipelineLoop(): Promise<never> {
           });
         }
         shipper.pruneShipped(7);
+        shipper.pruneShippedArchive(7);
+        await shipper.verify([]);
         const depth = shipper.outboxDepth();
         if (depth > 1000) reportError("event_write", `Outbox backlog: ${depth} pending rows`);
+        const aDepth = shipper.archiveDepth();
+        if (aDepth > 500) reportError("event_write", `Archive backlog: ${aDepth} pending rows`);
         await maybePruneRemoteEvents();
       }
       cycle++;
