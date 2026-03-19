@@ -53,3 +53,23 @@ export interface ProjectTelemetryUpdate {
 export function formatTokens(n: number): string {
   return (n / 1e6).toFixed(1) + "M";
 }
+
+export interface ShipResult {
+  shipped: number;
+  failed: number;
+  retriesScheduled: number;
+  circuitBreakerState: "closed" | "open" | "half-open";
+  byTarget: Record<string, { shipped: number; failed: number }>;
+}
+
+export interface ShippingStrategy {
+  table: string;
+  method: "upsert" | "update";
+  onConflict?: string;
+  filter?: Record<string, unknown>;
+  ignoreDuplicates?: boolean;
+  excludeFields?: string[];
+  batchSize: number;
+  fallbackToPerRow: boolean;
+  priority: number;
+}
