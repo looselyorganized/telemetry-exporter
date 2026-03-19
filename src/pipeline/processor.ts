@@ -4,6 +4,7 @@ import type { LogEntry, ModelStats, StatsCache } from "../parsers";
 import type { ProjectTokenMap } from "../project/scanner";
 import { computeTokensByProject } from "../project/scanner";
 import { enqueue, enqueueArchive, addKnownProject, getKnownProjectIds } from "../db/local";
+import { getSupabase } from "../db/client";
 import { sumValues, formatModelStats, type LifetimeCounters } from "../../bin/daemon-helpers";
 
 // ─── SQL aggregation result shape ────────────────────────────────────────────
@@ -24,6 +25,7 @@ export class Processor {
   private lastMetricsHash: string = "";
   private lastDailySync: string = "";
   private lastProjectSync: string = "";
+  private lastSnapshotTime: number = 0;
 
   constructor(resolver: ProjectResolver, db: Database) {
     this.resolver = resolver;
@@ -255,6 +257,120 @@ export class Processor {
       this.lastDailySync = today;
       this.lastProjectSync = today;
     })();
+  }
+
+  /** Startup initialization: load known_projects and hydrate baselines from Supabase. */
+  async hydrate(): Promise<void> {
+    this.loadKnownProjects();
+    await this._loadBaselinesFromSupabase();
+  }
+
+  /**
+   * Snapshot facility state to the archive_queue.
+   * Throttled to once per 5 minutes, but always fires on hour boundary.
+   */
+  snapshotFacilityState(facilityState: { status: string; activeAgents: number; activeProjects: any[] }): void {
+    const now = Date.now();
+    const isHourBoundary = new Date().getMinutes() < 1;
+    const elapsed = now - this.lastSnapshotTime;
+
+    if (!isHourBoundary && elapsed < 5 * 60 * 1000) {
+      return;
+    }
+
+    // Round to nearest 5 minutes for content hash stability
+    const roundedTimestamp = Math.round(now / (5 * 60 * 1000)) * (5 * 60 * 1000);
+    const hashInput = `snapshot\0${roundedTimestamp}`;
+    const hasher = new Bun.CryptoHasher("sha256");
+    hasher.update(hashInput);
+    const contentHash = hasher.digest("hex");
+
+    enqueueArchive("state_snapshot", JSON.stringify(facilityState), contentHash);
+    this.lastSnapshotTime = now;
+  }
+
+  /**
+   * Compose processEvents + processTokens + processMetrics in one call.
+   * Skips processEvents when entries array is empty.
+   */
+  processGapEntries(
+    entries: LogEntry[],
+    tokenMap: ProjectTokenMap,
+    statsCache: StatsCache | null,
+    modelStats: ModelStats[]
+  ): void {
+    if (entries.length > 0) this.processEvents(entries);
+    this.processTokens(tokenMap);
+    this.processMetrics(statsCache, modelStats);
+  }
+
+  /** Refresh token and lifetime baselines from Supabase. */
+  async refreshBaselines(): Promise<void> {
+    await this._loadBaselinesFromSupabase();
+  }
+
+  /** Trigger a resolver refresh (rebuilds dir→projId maps from disk). */
+  async refreshResolver(): Promise<void> {
+    await this.resolver.refresh();
+  }
+
+  // ─── Private helpers ──────────────────────────────────────────────────────
+
+  /** Shared implementation for hydrate() and refreshBaselines(). */
+  private async _loadBaselinesFromSupabase(): Promise<void> {
+    try {
+      const supabase = getSupabase();
+
+      // 1. Load token / lifetime baselines from project_telemetry
+      const { data: telemetryRows, error: telemetryError } = await supabase
+        .from("project_telemetry")
+        .select(
+          "project_id, tokens_lifetime, sessions_lifetime, messages_lifetime, tool_calls_lifetime, agent_spawns_lifetime, team_messages_lifetime"
+        )
+        .not("project_id", "is", null);
+
+      if (telemetryError || !telemetryRows) {
+        console.warn("[processor] hydrate: Supabase project_telemetry query failed — using zero baselines");
+        return;
+      }
+
+      for (const row of telemetryRows) {
+        if (!row.project_id) continue;
+        this.tokenBaseline.set(row.project_id, row.tokens_lifetime ?? 0);
+      }
+
+      // 2. Load lifetime event counters from daily_metrics
+      const { data: dailyRows, error: dailyError } = await supabase
+        .from("daily_metrics")
+        .select("project_id, sessions, messages, tool_calls, agent_spawns, team_messages")
+        .not("project_id", "is", null);
+
+      if (dailyError || !dailyRows) {
+        // Non-fatal: token baselines loaded, lifetime counters default to zero
+        console.warn("[processor] hydrate: Supabase daily_metrics query failed — lifetime counters will be zero");
+        return;
+      }
+
+      // Sum per project across all daily_metrics rows
+      const lifetimeSums = new Map<string, LifetimeCounters>();
+      for (const row of dailyRows) {
+        if (!row.project_id) continue;
+        let counters = lifetimeSums.get(row.project_id);
+        if (!counters) {
+          counters = { sessions: 0, messages: 0, toolCalls: 0, agentSpawns: 0, teamMessages: 0 };
+          lifetimeSums.set(row.project_id, counters);
+        }
+        counters.sessions += row.sessions ?? 0;
+        counters.messages += row.messages ?? 0;
+        counters.toolCalls += row.tool_calls ?? 0;
+        counters.agentSpawns += row.agent_spawns ?? 0;
+        counters.teamMessages += row.team_messages ?? 0;
+      }
+
+      this.lifetimeBaseline = lifetimeSums;
+    } catch (err) {
+      console.warn("[processor] hydrate: unexpected error —", err);
+    }
   }
 
   /** Process facility-wide metrics: enqueue facility_metrics and global daily_metrics. */
