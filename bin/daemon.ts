@@ -1,85 +1,38 @@
 #!/usr/bin/env bun
 /**
- * LO Telemetry Exporter
+ * LO Telemetry Exporter — Thin Orchestrator
  *
- * Reads Claude Code telemetry from ~/.claude/ and pushes it to Supabase
- * for the Loosely Organized operations dashboard.
+ * Wires pipeline stages (receivers -> processor -> shipper) together.
+ * Contains NO business logic — no caches, no aggregation, no project resolution.
  *
- * Usage:
- *   bun run bin/daemon.ts              # Start the daemon (incremental sync)
- *   bun run bin/daemon.ts --backfill   # Backfill all historical data, then run daemon
+ * Two loops:
+ *   1. Process Watcher (250ms) — detects Claude lifecycle, pushes direct to Supabase
+ *   2. Pipeline (5s) — collect -> process -> ship via SQLite outbox
  */
 
-import {
-  LogTailer,
-  readModelStats,
-  readStatsCache,
-  LOG_FILE,
-  type LogEntry,
-} from "../src/parsers";
-import {
-  formatTokens,
-  sumValues,
-  computeLastActive,
-  formatModelStats,
-  filterAndMapEntries,
-  aggregateProjectEvents,
-  buildProjectTelemetryUpdates as buildTelemetryUpdatesHelper,
-  filterRecentEntries,
-  type LifetimeCounters,
-  type TodayTokens,
-} from "./daemon-helpers";
-import { getFacilityState } from "../src/process/scanner";
-import { scanProjectTokens, computeTokensByProject } from "../src/project/scanner";
+import { LOG_FILE, readStatsCache, readModelStats } from "../src/parsers";
 import { initSupabase, getSupabase } from "../src/db/client";
-import {
-  type FacilityUpdate,
-  type FacilityMetricsUpdate,
-  type ProjectTelemetryUpdate,
-} from "../src/db/types";
-import { upsertProject, updateProjectActivity } from "../src/db/projects";
-import { insertEvents, pruneOldEvents } from "../src/db/events";
-import {
-  updateFacilityStatus,
-  updateFacilityMetrics,
-  setFacilitySwitch,
-} from "../src/db/facility";
-import {
-  syncDailyMetrics,
-  syncProjectDailyMetrics,
-  deleteProjectDailyMetrics,
-} from "../src/db/metrics";
-import { batchUpsertProjectTelemetry, verifyProjectTelemetry } from "../src/db/telemetry";
+import { setFacilitySwitch } from "../src/db/facility";
 import { pushAgentState } from "../src/db/agent-state";
 import { ProcessWatcher } from "../src/process/watcher";
 import { ProjectResolver } from "../src/project/resolver";
 import { reportError, clearErrors } from "../src/errors";
 import { flushErrors, pruneResolved, clearErrorsTable } from "../src/db/errors";
 import { PID_FILE, isProcessRunning } from "../src/cli-output";
-import { RegistrationRetryTracker } from "../src/registration-retry";
-import { readFileSync, writeFileSync, existsSync, unlinkSync, mkdirSync } from "fs";
-import { join, dirname } from "path";
-import { fileURLToPath } from "url";
 import { initLocal, getLocal, closeLocal } from "../src/db/local";
 import { LogReceiver, TokenReceiver, MetricsReceiver } from "../src/pipeline/receivers";
 import { Processor } from "../src/pipeline/processor";
 import { Shipper } from "../src/pipeline/shipper";
+import { pruneOldEvents } from "../src/db/events";
+import { deleteProjectDailyMetrics } from "../src/db/metrics";
+import { readFileSync, writeFileSync, existsSync, unlinkSync, mkdirSync } from "fs";
+import { join, dirname } from "path";
+import { fileURLToPath } from "url";
 
 // ─── Config ────────────────────────────────────────────────────────────────
-
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_SECRET_KEY;
 const IS_BACKFILL = process.argv.includes("--backfill");
-
-// Per-target outbox pipeline flags. Enable new path first, then disable old path.
-// Brief dual-writing is safe due to upsert idempotency.
-const OUTBOX_ENABLED: Record<string, boolean> = {
-  events: true,
-  projects: true,
-  daily_metrics: true,
-  project_telemetry: true,
-  facility_metrics: true,
-};
 
 if (!SUPABASE_URL || !SUPABASE_KEY) {
   console.error("Missing SUPABASE_URL or SUPABASE_SECRET_KEY");
@@ -87,46 +40,43 @@ if (!SUPABASE_URL || !SUPABASE_KEY) {
   process.exit(1);
 }
 
-// ─── Single-instance guard (PID file) ───────────────────────────────────────
+// ─── Single-instance guard (PID file, atomic creation) ──────────────────────
+function removePidFile(): void { try { unlinkSync(PID_FILE); } catch {} }
 
-if (existsSync(PID_FILE)) {
-  const existingPid = parseInt(readFileSync(PID_FILE, "utf-8").trim(), 10);
-  if (!isNaN(existingPid) && isProcessRunning(existingPid) && existingPid !== process.pid) {
-    console.error(`Another exporter is already running (PID ${existingPid}).`);
-    console.error(`If this is stale, remove ${PID_FILE} and retry.`);
-    process.exit(1);
+try {
+  writeFileSync(PID_FILE, String(process.pid), { flag: "wx" });
+} catch {
+  if (existsSync(PID_FILE)) {
+    const existingPid = parseInt(readFileSync(PID_FILE, "utf-8").trim(), 10);
+    if (!isNaN(existingPid) && isProcessRunning(existingPid) && existingPid !== process.pid) {
+      console.error(`Another exporter is already running (PID ${existingPid}).`);
+      console.error(`If this is stale, remove ${PID_FILE} and retry.`);
+      process.exit(1);
+    }
   }
+  writeFileSync(PID_FILE, String(process.pid));
 }
 
-writeFileSync(PID_FILE, String(process.pid));
-
-// Clean up PID file on exit
-function removePidFile(): void {
-  try { unlinkSync(PID_FILE); } catch {}
-}
-
-function handleShutdown(): void {
-  try { closeLocal(); } catch {}  // checkpoint WAL
+// ─── Signal handlers ────────────────────────────────────────────────────────
+function shutdown(): void {
+  try { void flushErrors(); } catch {}
+  try { closeLocal(); } catch {}
   removePidFile();
   process.exit(0);
 }
-
+process.on("SIGINT", shutdown);
+process.on("SIGTERM", shutdown);
 process.on("exit", removePidFile);
-process.on("SIGINT", handleShutdown);
-process.on("SIGTERM", handleShutdown);
 
-// ─── Init ──────────────────────────────────────────────────────────────────
-
+// ─── Init ───────────────────────────────────────────────────────────────────
 console.log("LO Telemetry Exporter starting...");
 console.log(`  Supabase: ${SUPABASE_URL}`);
 console.log(`  Watcher: 250ms poll (agent state push-on-change)`);
 console.log(`  Aggregator: 5s cycle (tokens, sessions, events)`);
-console.log(`  Mode: ${IS_BACKFILL ? "BACKFILL + daemon" : "daemon (incremental)"}`);
-console.log();
+console.log(`  Mode: ${IS_BACKFILL ? "BACKFILL + daemon" : "daemon (incremental)"}\n`);
 
 initSupabase(SUPABASE_URL, SUPABASE_KEY);
 
-// Initialize SQLite outbox database
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const DB_DIR = join(REPO_ROOT, "data");
 const DB_PATH = join(DB_DIR, "telemetry.db");
@@ -134,566 +84,31 @@ mkdirSync(DB_DIR, { recursive: true });
 initLocal(DB_PATH);
 console.log(`  SQLite: ${DB_PATH}`);
 
-// Clear live error state from previous runs
 clearErrors();
 await clearErrorsTable();
 
-const tailer = new LogTailer();
-
-// ─── State ──────────────────────────────────────────────────────────────────
-
-// Track projects we've already ensured exist in the DB (by projId)
-const knownProjects = new Set<string>();
-
-// Tracks failed registrations with exponential backoff, event buffers, and original meta
-const tracker = new RegistrationRetryTracker();
-
-// Single resolution authority for dirName → projId/slug mapping
+// ─── Build pipeline ─────────────────────────────────────────────────────────
 const resolver = new ProjectResolver();
-
-async function refreshResolver(): Promise<void> {
-  await resolver.refresh();
-  const stats = resolver.stats();
-  console.log(
-    `  Project maps: ${stats.total} projects mapped (lo.yml: ${stats.fromLoYml}, cache: ${stats.fromNameCache})`
-  );
-}
-
-function toProjId(dirName: string): string | null {
-  return resolver.resolve(dirName)?.projId ?? null;
-}
-
-// ─── Pipeline stages ────────────────────────────────────────────────────────
+await resolver.refresh();
+const rStats = resolver.stats();
+console.log(`  Project maps: ${rStats.total} projects mapped (lo.yml: ${rStats.fromLoYml}, cache: ${rStats.fromNameCache})`);
 
 const logReceiver = new LogReceiver(LOG_FILE, DB_PATH);
 const tokenReceiver = new TokenReceiver(resolver);
 const metricsReceiver = new MetricsReceiver();
 const processor = new Processor(resolver, getLocal());
 const shipper = new Shipper(getLocal(), getSupabase());
-
-// Hydrate processor (load known projects from SQLite, baselines from Supabase)
 await processor.hydrate();
 
-// Cache project token totals for facility status updates
-let cachedTokensByProject: Record<string, number> = {};
-
-// Cache per-project lifetime counters for project_telemetry writes
-let cachedLifetimeCounters: Record<string, LifetimeCounters> = {};
-
-// Cache per-project today tokens for project_telemetry writes
-let cachedTodayTokensByProject: Record<string, TodayTokens> = {};
-
-
-// Cache all seen log entries to avoid re-reading the entire events.log
-let allSeenEntries: LogEntry[] = [];
-
-// Cache model stats — only re-read from disk when new events arrive
-let cachedModelStats: ReturnType<typeof readModelStats> = [];
-
-// Last written projIds for periodic telemetry verification
-let lastWrittenProjIds: string[] = [];
-let lastWrittenUpdates: ProjectTelemetryUpdate[] = [];
-
-// ─── Helpers ────────────────────────────────────────────────────────────────
-
-/** Today's date as "YYYY-MM-DD". */
-function todayDateString(): string {
-  return new Date().toISOString().split("T")[0];
-}
-
-// ─── Drain buffered events after successful registration ─────────────────
-
-async function drainBufferedEvents(projId: string, slug: string): Promise<void> {
-  const buffered = tracker.markSuccess(projId);
-  if (buffered.length === 0) return;
-
-  console.log(`  Draining ${buffered.length} buffered events for ${slug} [${projId}]`);
-  try {
-    const { insertedByProject, errors } = await insertEvents(buffered);
-    if (errors > 0) {
-      console.warn(`  Drain had ${errors} failed event writes for ${slug} [${projId}] — events dropped (scanProjectTokens will recover metrics)`);
-    }
-    const lastActiveByProject = computeLastActive(buffered);
-    for (const [pid, count] of Object.entries(insertedByProject)) {
-      const lastActive = lastActiveByProject[pid] ?? new Date();
-      await updateProjectActivity(pid, count, lastActive);
-    }
-  } catch (err) {
-    console.error(`  Failed to drain buffered events for ${slug} [${projId}], events dropped (scanProjectTokens will recover metrics):`, err);
-  }
-}
-
-// ─── Ensure projects exist ─────────────────────────────────────────────────
-
-async function ensureProjects(entries: LogEntry[]): Promise<void> {
-  const newProjIds = new Set<string>();
-  const projIdToLocal = new Map<string, string>();
-  const projIdToSlug = new Map<string, string>();
-
-  for (const entry of entries) {
-    if (!entry.project) continue;
-    const resolved = resolver.resolve(entry.project);
-    if (!resolved) continue;
-    if (!knownProjects.has(resolved.projId)) {
-      newProjIds.add(resolved.projId);
-      projIdToLocal.set(resolved.projId, entry.project);
-      projIdToSlug.set(resolved.projId, resolved.slug);
-    }
-  }
-
-  for (const projId of newProjIds) {
-    const localName = projIdToLocal.get(projId) ?? "";
-    const slug = projIdToSlug.get(projId) ?? "";
-    const firstEntry = entries.find((e) => toProjId(e.project) === projId);
-    const ok = await upsertProject(projId, slug, firstEntry?.parsedTimestamp ?? undefined);
-    if (ok) {
-      knownProjects.add(projId);
-      console.log(`  Project registered: ${slug} [${projId}]${slug !== localName ? ` (dir: ${localName})` : ""}`);
-      await drainBufferedEvents(projId, slug);
-    } else {
-      tracker.markFailed(projId, localName, slug);
-      console.error(`  Project registration failed: ${slug} [${projId}] — buffering events, will retry`);
-    }
-  }
-}
-
-/**
- * Periodic retry: re-attempt upsertProject for projects in the tracker.
- * Called every 5 minutes (60 cycles). Uses stored meta for dirName/slug.
- */
-async function retryFailedRegistrations(currentCycle: number): Promise<void> {
-  const readyToRetry = tracker.getReadyToRetry(currentCycle);
-  if (readyToRetry.length === 0 && tracker.getAbandonedToReport().length === 0) return;
-
-  if (readyToRetry.length > 0) {
-    console.log(`  Retrying ${readyToRetry.length} failed registrations...`);
-  }
-
-  for (const projId of readyToRetry) {
-    const meta = tracker.getMeta(projId);
-    if (!meta) continue;
-
-    const ok = await upsertProject(projId, meta.slug);
-
-    if (ok) {
-      knownProjects.add(projId);
-      console.log(`  Retry succeeded: ${meta.slug} [${projId}]`);
-      await drainBufferedEvents(projId, meta.slug);
-    } else {
-      tracker.recordAttempt(projId, currentCycle);
-      console.warn(`  Retry failed: ${meta.slug} [${projId}]`);
-    }
-  }
-
-  // Report abandoned projects (6+ failures) — these stop retrying
-  for (const abandoned of tracker.getAbandonedToReport()) {
-    reportError("project_registration", `registration abandoned after ${abandoned.attempts} attempts`, {
-      projId: abandoned.projId,
-      dirName: abandoned.dirName,
-      slug: abandoned.slug,
-    });
-  }
-}
-
-// ─── Compute facility-wide totals from per-project caches ──────────────────
-
-function computeTodayTokens(): number {
-  let total = 0;
-  for (const entry of Object.values(cachedTodayTokensByProject)) total += entry.total;
-  return total;
-}
-
-function sumLifetimeField(field: keyof LifetimeCounters): number {
-  let total = 0;
-  for (const c of Object.values(cachedLifetimeCounters)) total += c[field];
-  return total;
-}
-
-// ─── Shared helpers ─────────────────────────────────────────────────────────
-
-/** Build ProjectTelemetryUpdate[] from cached data. */
-function buildProjectTelemetryUpdates(
-  agentsByProject?: Record<string, { count: number; active: number }>
-): ProjectTelemetryUpdate[] {
-  return buildTelemetryUpdatesHelper(
-    {
-      tokensByProject: cachedTokensByProject,
-      lifetimeCounters: cachedLifetimeCounters,
-      todayTokensByProject: cachedTodayTokensByProject,
-    },
-    agentsByProject
-  ) as ProjectTelemetryUpdate[];
-}
-
-// ─── Shared: insert events and update project activity ──────────────────────
-
-/**
- * Filter entries to LO projects, insert into Supabase, and update
- * per-project activity counts. Returns the insert result.
- */
-async function insertAndTrackActivity(entries: LogEntry[]): Promise<{
-  inserted: number;
-  errors: number;
-}> {
-  const loEntries = filterAndMapEntries(entries, toProjId);
-  const toInsert: LogEntry[] = [];
-  for (const entry of loEntries) {
-    if (tracker.hasFailed(entry.project)) {
-      if (!tracker.bufferEvent(entry.project, entry)) {
-        reportError("project_registration", "event buffer full — dropping events", {
-          projId: entry.project,
-          limit: RegistrationRetryTracker.MAX_BUFFER,
-        });
-      }
-    } else {
-      toInsert.push(entry);
-    }
-  }
-  const { inserted, errors, insertedByProject } = await insertEvents(toInsert);
-
-  const lastActiveByProject = computeLastActive(toInsert);
-  for (const [projId, count] of Object.entries(insertedByProject)) {
-    const lastActive = lastActiveByProject[projId] ?? new Date();
-    await updateProjectActivity(projId, count, lastActive);
-  }
-
-  return { inserted, errors };
-}
-
-// ─── Backfill ──────────────────────────────────────────────────────────────
-
-async function backfill(): Promise<void> {
-  console.log("Starting backfill...");
-
-  // 1. Build slug + projId maps
-  await refreshResolver();
-
-  // 2. Read all events
-  console.log("  Reading events.log...");
-  const allEntries = tailer.readAll();
-  allSeenEntries = allEntries;
-  console.log(`  Found ${allEntries.length} events`);
-
-  // 3. Ensure all projects exist
-  console.log("  Registering projects...");
-  await ensureProjects(allEntries);
-
-  // 4. Insert events and update project activity
-  console.log("  Inserting events...");
-  const { inserted, errors } = await insertAndTrackActivity(allEntries);
-  console.log(`  Inserted: ${inserted}, Errors: ${errors}`);
-
-  // 5. Sync daily metrics from stats-cache.json
-  console.log("  Syncing daily metrics...");
-  const statsCache = readStatsCache();
-  cachedModelStats = readModelStats();
-  if (statsCache) {
-    const synced = await syncDailyMetrics(statsCache);
-    console.log(`  Synced ${synced} daily metric rows`);
-  }
-
-  // 6. Delete stale per-project daily_metrics before recomputing
-  console.log("  Cleansing stale per-project daily_metrics...");
-  const deletedRows = await deleteProjectDailyMetrics();
-  console.log(`  Deleted ${deletedRows} stale per-project daily_metrics rows`);
-
-  // 7. Scan and sync per-project token metrics + event counts from JSONL files
-  console.log("  Scanning JSONL files for per-project tokens...");
-  const projectTokenMap = scanProjectTokens(resolver);
-  cachedTokensByProject = computeTokensByProject(projectTokenMap);
-  const projectEventAggregates = aggregateProjectEvents(allEntries, toProjId);
-  const projectSynced = await syncProjectDailyMetrics(projectTokenMap, projectEventAggregates);
-  console.log(`  Synced ${projectSynced} per-project daily metric rows`);
-
-  // 8. Populate caches for project_telemetry writes from daily_metrics (authoritative)
-  await refreshLifetimeCountersFromDb();
-  refreshTodayTokensCache(projectTokenMap, todayDateString());
-
-  // 9. Update facility status + project_telemetry
-  console.log("  Updating facility status...");
-  await syncFacilityStatus(statsCache, cachedModelStats);
-
-  // 10. Verify backfill writes persisted -- refresh caches from DB
-  console.log("  Verifying backfill writes...");
-  const { data: verifyRows } = await getSupabase()
-    .from("project_telemetry")
-    .select("project_id, tokens_lifetime");
-  if (verifyRows) {
-    for (const row of verifyRows) {
-      const projId = row.project_id as string;
-      const dbTokens = Number(row.tokens_lifetime);
-      const expected = cachedTokensByProject[projId] ?? 0;
-      if (dbTokens !== expected) {
-        console.warn(
-          `  WARN: ${projId} — cache has ${formatTokens(expected)} but DB has ${formatTokens(dbTokens)}`
-        );
-      }
-      cachedTokensByProject[projId] = dbTokens;
-    }
-    console.log(
-      `  Verified ${verifyRows.length} project_telemetry rows:`,
-      verifyRows.map((r) => `${r.project_id}: ${formatTokens(Number(r.tokens_lifetime))}`).join(", ")
-    );
-  }
-
-  pruneSeenEntries();
-
-  console.log("Backfill complete.\n");
-}
-
-// ─── Incremental sync ──────────────────────────────────────────────────────
-
-async function incrementalSync(): Promise<void> {
-  // === New pipeline path ===
-  try {
-    const pipelineEntries = logReceiver.poll();
-    if (pipelineEntries.length > 0 && OUTBOX_ENABLED.events) {
-      processor.processEvents(pipelineEntries);
-    }
-  } catch (err) {
-    reportError("receiver", `logReceiver: ${err instanceof Error ? err.message : String(err)}`);
-  }
-
-  try {
-    const tokenMap = tokenReceiver.poll();
-    if (OUTBOX_ENABLED.project_telemetry || OUTBOX_ENABLED.daily_metrics) {
-      processor.processTokens(tokenMap);
-    }
-  } catch (err) {
-    reportError("receiver", `tokenReceiver: ${err instanceof Error ? err.message : String(err)}`);
-  }
-
-  try {
-    const metrics = metricsReceiver.poll();
-    if (OUTBOX_ENABLED.facility_metrics) {
-      processor.processMetrics(metrics.statsCache, metrics.modelStats);
-    }
-  } catch (err) {
-    reportError("receiver", `metricsReceiver: ${err instanceof Error ? err.message : String(err)}`);
-  }
-
-  // Ship outbox → Supabase
-  const shipResult = await shipper.ship();
-  if (shipResult.shipped > 0 || shipResult.failed > 0) {
-    console.log(`  ${new Date().toLocaleTimeString()} — shipped ${shipResult.shipped} rows${shipResult.failed > 0 ? `, ${shipResult.failed} failed` : ""}`);
-  }
-
-  // === Old direct paths (only when outbox is disabled for the target) ===
-  const newEntries = tailer.poll();
-
-  if (newEntries.length > 0) {
-    allSeenEntries.push(...newEntries);
-    if (!OUTBOX_ENABLED.projects) {
-      await ensureProjects(newEntries);
-    }
-    cachedModelStats = readModelStats();
-
-    if (!OUTBOX_ENABLED.events) {
-      const { inserted, errors } = await insertAndTrackActivity(newEntries);
-      if (inserted > 0 || errors > 0) {
-        console.log(
-          `  ${new Date().toLocaleTimeString()} — ${inserted} events synced${errors > 0 ? `, ${errors} errors` : ""}`
-        );
-      }
-    }
-  }
-
-  // Sync aggregate metrics (tokens, sessions — NOT agent state)
-  if (!OUTBOX_ENABLED.facility_metrics) {
-    const statsCache = readStatsCache();
-    await syncAggregateMetrics(statsCache, cachedModelStats);
-  }
-}
-
-// ─── Facility status sync ──────────────────────────────────────────────────
-
-/** Build the aggregate metrics shared by facility status and metrics-only updates. */
-function buildFacilityMetrics(
-  statsCache: ReturnType<typeof readStatsCache>,
-  modelStats: ReturnType<typeof readModelStats>
-): FacilityMetricsUpdate {
-  return {
-    tokensLifetime: sumValues(cachedTokensByProject),
-    tokensToday: computeTodayTokens(),
-    sessionsLifetime: sumLifetimeField("sessions"),
-    messagesLifetime: sumLifetimeField("messages"),
-    modelStats: formatModelStats(modelStats),
-    hourDistribution: statsCache?.hourCounts ?? {},
-    firstSessionDate: statsCache?.firstSessionDate ?? null,
-  };
-}
-
-async function syncFacilityStatus(
-  statsCache: ReturnType<typeof readStatsCache>,
-  modelStats: ReturnType<typeof readModelStats>
-): Promise<ReturnType<typeof getFacilityState>> {
-  const facility = getFacilityState();
-
-  // Compute per-project agent breakdown (keyed by projId)
-  const agentsByProject: Record<string, { count: number; active: number }> = {};
-  for (const proc of facility.processes) {
-    if (proc.projId === "unknown") continue;
-    const entry = agentsByProject[proc.projId] ??= { count: 0, active: 0 };
-    entry.count++;
-    if (proc.isActive) entry.active++;
-  }
-
-  const update: FacilityUpdate = {
-    ...buildFacilityMetrics(statsCache, modelStats),
-    status: facility.status,
-    activeAgents: facility.activeAgents,
-    activeProjects: facility.activeProjects,
-  };
-
-  await updateFacilityStatus(update);
-  const telemetryUpdates = buildProjectTelemetryUpdates(agentsByProject);
-  const { writtenProjIds } = await batchUpsertProjectTelemetry(telemetryUpdates);
-  lastWrittenProjIds = writtenProjIds;
-  lastWrittenUpdates = telemetryUpdates;
-
-  return facility;
-}
-
-// ─── Aggregate metrics sync (daemon mode) ──────────────────────────────────
-
-async function syncAggregateMetrics(
-  statsCache: ReturnType<typeof readStatsCache>,
-  modelStats: ReturnType<typeof readModelStats>
-): Promise<void> {
-  await updateFacilityMetrics(buildFacilityMetrics(statsCache, modelStats));
-  const telemetryUpdates = buildProjectTelemetryUpdates();
-  const { writtenProjIds } = await batchUpsertProjectTelemetry(telemetryUpdates, { skipAgentFields: true });
-  lastWrittenProjIds = writtenProjIds;
-  lastWrittenUpdates = telemetryUpdates;
-}
-
-// ─── Periodic daily metrics sync ───────────────────────────────────────────
-
-let lastDailySync = "";
-
-async function maybeSyncDailyMetrics(
-  statsCache: ReturnType<typeof readStatsCache>
-): Promise<void> {
-  const today = todayDateString();
-  if (today === lastDailySync) return;
-
-  if (statsCache) {
-    await syncDailyMetrics(statsCache);
-    lastDailySync = today;
-  }
-}
-
-// ─── Periodic project daily metrics sync ────────────────────────────────────
-
-let lastProjectSync = "";
-let lastPruneDate = "";
-
-async function maybeSyncProjectDailyMetrics(): Promise<void> {
-  const today = todayDateString();
-  if (today === lastProjectSync) return;
-
-  try {
-    const projectTokenMap = scanProjectTokens(resolver);
-    cachedTokensByProject = computeTokensByProject(projectTokenMap);
-    const projectEventAggregates = aggregateProjectEvents(allSeenEntries, toProjId);
-    await syncProjectDailyMetrics(projectTokenMap, projectEventAggregates);
-
-    await refreshLifetimeCountersFromDb();
-    refreshTodayTokensCache(projectTokenMap, today);
-
-    lastProjectSync = today;
-  } catch (err) {
-    console.error("Error syncing project daily metrics:", err);
-    reportError("event_write", `maybeSyncProjectDailyMetrics: ${err instanceof Error ? err.message : String(err)}`);
-  }
-}
-
-/**
- * Refresh lifetime counters (sessions, messages, tool_calls, etc.)
- * from daily_metrics in Supabase. This is the authoritative source
- * because in daemon mode allSeenEntries only contains events since startup.
- */
-async function refreshLifetimeCountersFromDb(): Promise<void> {
-  const { data: lifetimeRows } = await getSupabase()
-    .from("daily_metrics")
-    .select("project_id, sessions, messages, tool_calls, agent_spawns, team_messages")
-    .not("project_id", "is", null);
-  if (lifetimeRows) {
-    const sums: Record<string, LifetimeCounters> = {};
-    for (const row of lifetimeRows) {
-      const p = row.project_id as string;
-      if (!sums[p]) sums[p] = { sessions: 0, messages: 0, toolCalls: 0, agentSpawns: 0, teamMessages: 0 };
-      sums[p].sessions += Number(row.sessions) || 0;
-      sums[p].messages += Number(row.messages) || 0;
-      sums[p].toolCalls += Number(row.tool_calls) || 0;
-      sums[p].agentSpawns += Number(row.agent_spawns) || 0;
-      sums[p].teamMessages += Number(row.team_messages) || 0;
-    }
-    cachedLifetimeCounters = sums;
-  }
-}
-
-/**
- * Re-scan JSONL files and refresh all per-project caches.
- * Runs on the 5-minute cycle so token counts and lifetime counters
- * stay current throughout the day.
- */
-async function refreshProjectCachesFromDisk(): Promise<void> {
-  const today = todayDateString();
-  const projectTokenMap = scanProjectTokens(resolver);
-  cachedTokensByProject = computeTokensByProject(projectTokenMap);
-  refreshTodayTokensCache(projectTokenMap, today);
-  await refreshLifetimeCountersFromDb();
-}
-
-function refreshTodayTokensCache(projectTokenMap: ReturnType<typeof scanProjectTokens>, today: string): void {
-  for (const [projId, dateMap] of projectTokenMap) {
-    const models = dateMap.get(today) ?? {};
-    cachedTodayTokensByProject[projId] = { total: sumValues(models), models };
-  }
-}
-
-async function maybePruneEvents(): Promise<void> {
-  const today = todayDateString();
-  if (today === lastPruneDate) return;
-
-  try {
-    const pruned = await pruneOldEvents(14);
-    if (pruned > 0) {
-      console.log(`  Pruned ${pruned} events older than 14 days`);
-    }
-    lastPruneDate = today;
-  } catch (err) {
-    console.error("Error pruning events:", err);
-    reportError("event_write", `maybePruneEvents: ${err instanceof Error ? err.message : String(err)}`);
-  }
-}
-
-// ─── Prune in-memory seen entries ───────────────────────────────────────────
-
-function pruneSeenEntries(): void {
-  const before = allSeenEntries.length;
-  allSeenEntries = filterRecentEntries(allSeenEntries, 31);
-  const pruned = before - allSeenEntries.length;
-  if (pruned > 0) {
-    console.log(`  Pruned ${pruned} in-memory entries older than 31 days`);
-  }
-}
-
-// ─── Gap backfill ───────────────────────────────────────────────────────────
-
-const GAP_THRESHOLD_MS = 2 * 60 * 1000; // 2 minutes — longer than any normal push cycle
-
-async function gapBackfill(allEntries: LogEntry[]): Promise<void> {
-  // Check when the exporter last pushed
-  const { data: facilityRow } = await getSupabase()
-    .from("facility_status")
-    .select("updated_at")
-    .single();
-
-  const lastUpdated = facilityRow?.updated_at
-    ? new Date(facilityRow.updated_at as string)
-    : null;
+// ─── Gap detection ──────────────────────────────────────────────────────────
+const GAP_THRESHOLD_MS = 2 * 60 * 1000;
+
+async function detectAndFillGap(): Promise<void> {
+  const allEntries = logReceiver.readAll();
+  console.log(`  ${allEntries.length} entries in log`);
+
+  const { data: row } = await getSupabase().from("facility_status").select("updated_at").single();
+  const lastUpdated = row?.updated_at ? new Date(row.updated_at as string) : null;
   const gapMs = lastUpdated ? Date.now() - lastUpdated.getTime() : Infinity;
 
   if (gapMs < GAP_THRESHOLD_MS) {
@@ -701,235 +116,154 @@ async function gapBackfill(allEntries: LogEntry[]): Promise<void> {
     return;
   }
 
-  const gapMinutes = Math.round(gapMs / 60_000);
-  console.log(`  Gap detected: exporter was offline for ~${gapMinutes} minutes`);
-  console.log(`  Last update: ${lastUpdated?.toISOString() ?? "never"}`);
-
-  // Filter entries to only those after the last update
+  console.log(`  Gap detected: offline ~${Math.round(gapMs / 60_000)} min (last: ${lastUpdated?.toISOString() ?? "never"})`);
   const gapEntries = lastUpdated
-    ? allEntries.filter(
-        (e) => e.parsedTimestamp && e.parsedTimestamp > lastUpdated
-      )
+    ? allEntries.filter((e) => e.parsedTimestamp && e.parsedTimestamp > lastUpdated)
     : allEntries;
-  console.log(
-    `  Found ${gapEntries.length} events in the gap (of ${allEntries.length} total)`
-  );
+  console.log(`  Found ${gapEntries.length} events in the gap (of ${allEntries.length} total)`);
 
-  // === New pipeline path for gap backfill ===
-  if (OUTBOX_ENABLED.events) {
-    const statsCache = readStatsCache();
-    cachedModelStats = readModelStats();
-    const tokenMap = scanProjectTokens(resolver);
-    processor.processGapEntries(gapEntries, tokenMap, statsCache, cachedModelStats);
-    console.log(`  Gap backfill (pipeline): ${gapEntries.length} entries queued for shipping`);
-    // Shipper will drain on first aggregator cycle
-    allSeenEntries.push(...gapEntries);
-  } else {
-    // === Old direct path ===
-    if (gapEntries.length === 0) {
-      console.log("  No events to backfill, syncing metrics only...");
-    } else {
-      await ensureProjects(gapEntries);
-
-      const { inserted, errors } = await insertAndTrackActivity(gapEntries);
-      console.log(
-        `  Gap backfill: ${inserted} events inserted${errors > 0 ? `, ${errors} errors` : ""}`
-      );
-
-      allSeenEntries.push(...gapEntries);
-    }
-
-    // Sync daily metrics (idempotent upserts — covers the full gap)
-    const statsCache = readStatsCache();
-    cachedModelStats = readModelStats();
-    if (statsCache) {
-      const synced = await syncDailyMetrics(statsCache);
-      console.log(`  Gap backfill: synced ${synced} daily metric rows`);
-    }
-
-    // Scan JSONL files for per-project tokens (full scan, idempotent)
-    const projectTokenMap = scanProjectTokens(resolver);
-    cachedTokensByProject = computeTokensByProject(projectTokenMap);
-    const projectEventAggregates = aggregateProjectEvents(allSeenEntries, toProjId);
-    const projectSynced = await syncProjectDailyMetrics(
-      projectTokenMap,
-      projectEventAggregates
-    );
-    console.log(
-      `  Gap backfill: synced ${projectSynced} per-project daily metric rows`
-    );
-
-    // Populate caches from daily_metrics (authoritative)
-    await refreshLifetimeCountersFromDb();
-    refreshTodayTokensCache(projectTokenMap, todayDateString());
-
-    // Update facility status with fresh data
-    await syncFacilityStatus(statsCache, cachedModelStats);
-  }
-
-  pruneSeenEntries();
-  console.log("  Gap backfill complete.\n");
+  processor.processGapEntries(gapEntries, tokenReceiver.poll(), readStatsCache(), readModelStats());
+  console.log(`  Gap backfill: ${gapEntries.length} entries queued for shipping`);
 }
 
-// ─── Main loop ─────────────────────────────────────────────────────────────
+// ─── Backfill mode ──────────────────────────────────────────────────────────
+async function runBackfill(): Promise<void> {
+  console.log("Starting backfill...");
+  const allEntries = logReceiver.readAll();
+  console.log(`  Found ${allEntries.length} events`);
 
-async function main(): Promise<void> {
-  if (IS_BACKFILL) {
-    await backfill();
-  } else {
-    // Build initial slug + projId maps
-    await refreshResolver();
+  const deleted = await deleteProjectDailyMetrics();
+  console.log(`  Deleted ${deleted} stale per-project daily_metrics rows`);
 
-    // Read all existing entries (sets tailer offset to end of file)
-    console.log("Reading log file...");
-    const allEntries = tailer.readAll();
-    console.log(`  ${allEntries.length} entries in log`);
+  processor.processGapEntries(allEntries, tokenReceiver.poll(), readStatsCache(), readModelStats());
+  console.log(`  Backfill: ${allEntries.length} entries queued`);
 
-    // Check for gap and backfill missed events
-    await gapBackfill(allEntries);
-
-    // Seed caches from project_telemetry for ongoing updates
-    console.log("  Loading cached telemetry from Supabase...");
-    const { data: ptRows } = await getSupabase()
-      .from("project_telemetry")
-      .select("project_id, tokens_lifetime, tokens_today, models_today, sessions_lifetime, messages_lifetime, tool_calls_lifetime, agent_spawns_lifetime, team_messages_lifetime");
-    if (ptRows && ptRows.length > 0) {
-      for (const row of ptRows) {
-        cachedTokensByProject[row.project_id] = Number(row.tokens_lifetime) || 0;
-        cachedLifetimeCounters[row.project_id] = {
-          sessions: Number(row.sessions_lifetime) || 0,
-          messages: Number(row.messages_lifetime) || 0,
-          toolCalls: Number(row.tool_calls_lifetime) || 0,
-          agentSpawns: Number(row.agent_spawns_lifetime) || 0,
-          teamMessages: Number(row.team_messages_lifetime) || 0,
-        };
-        const models = (row.models_today && typeof row.models_today === "object")
-          ? row.models_today as Record<string, number>
-          : {};
-        cachedTodayTokensByProject[row.project_id] = {
-          total: Number(row.tokens_today) || 0,
-          models,
-        };
-      }
-      console.log(`  Loaded ${ptRows.length} project telemetry entries`);
-    }
-
-    console.log("  Ready — will only sync new events from this point.\n");
+  let totalShipped = 0;
+  while (shipper.outboxDepth() > 0) {
+    totalShipped += (await shipper.ship()).shipped;
+    await Bun.sleep(100);
   }
-
-  console.log("Daemon running (250ms watcher + 5s aggregator). Press Ctrl+C to stop.\n");
-
-  const watcher = new ProcessWatcher();
-
-  // ── Auto-close: flip facility to dormant after 2h with no active agents ──
-  const AUTO_CLOSE_MS = 2 * 60 * 60 * 1000; // 2 hours
-  let lastActiveAgentTime = Date.now();
-  let autoCloseFired = false;
-
-  // ── Loop 1: Process Watcher (250ms) ──
-  async function watcherLoop(): Promise<never> {
-    while (true) {
-      try {
-        const diff = watcher.tick();
-        if (diff) {
-          await pushAgentState(diff);
-          for (const event of diff.events) {
-            const ts = new Date().toLocaleTimeString();
-            console.log(`  ${ts} [${event.type}] ${event.project} (pid ${event.pid})`);
-          }
-        }
-
-        if (watcher.activeAgents > 0) {
-          lastActiveAgentTime = Date.now();
-          autoCloseFired = false;
-        }
-
-        if (!autoCloseFired && Date.now() - lastActiveAgentTime > AUTO_CLOSE_MS) {
-          await setFacilitySwitch("dormant");
-          autoCloseFired = true;
-          console.log(`  ${new Date().toLocaleTimeString()} [auto-close] Facility dormant after 2h idle`);
-        }
-      } catch (err) {
-        console.error("Watcher error:", err);
-        reportError("facility_state", `watcherLoop: ${err instanceof Error ? err.message : String(err)}`);
-      }
-      await Bun.sleep(250);
-    }
-  }
-
-  // ── Loop 2: Aggregate Metrics (5s) ──
-  let cycleCount = 0;
-  async function aggregateLoop(): Promise<never> {
-    while (true) {
-      try {
-        await incrementalSync();
-
-        // Archive shipping (every 12 cycles / ~60s)
-        if (cycleCount % 12 === 0 && cycleCount > 0) {
-          await shipper.shipArchive();
-        }
-
-        // Periodic tasks every ~60 cycles (~5 minutes at 5s interval)
-        if (cycleCount % 60 === 0 && cycleCount > 0) {
-          const statsCache = readStatsCache();
-          await refreshResolver();
-
-          // Pipeline maintenance
-          if (OUTBOX_ENABLED.events) {
-            await processor.refreshResolver();
-            await processor.refreshBaselines();
-            shipper.pruneShipped(7);
-
-            const depth = shipper.outboxDepth();
-            if (depth > 1000) {
-              reportError("pipeline", `Outbox backlog: ${depth} pending rows`);
-            }
-          }
-
-          // Old-path periodic tasks (only when outbox is disabled for the target)
-          if (!OUTBOX_ENABLED.projects) {
-            await retryFailedRegistrations(cycleCount);
-          }
-          if (!OUTBOX_ENABLED.project_telemetry) {
-            if (lastWrittenProjIds.length > 0) {
-              await verifyProjectTelemetry(lastWrittenUpdates, lastWrittenProjIds);
-            }
-            await refreshProjectCachesFromDisk();
-          }
-          const settled = await Promise.allSettled([
-            !OUTBOX_ENABLED.daily_metrics ? maybeSyncDailyMetrics(statsCache) : Promise.resolve(),
-            !OUTBOX_ENABLED.daily_metrics ? maybeSyncProjectDailyMetrics() : Promise.resolve(),
-            maybePruneEvents(),
-          ]);
-          for (const r of settled) {
-            if (r.status === "rejected") console.error("  Periodic task failed:", r.reason);
-          }
-          pruneSeenEntries();
-        }
-        cycleCount++;
-      } catch (err) {
-        console.error("Aggregate sync error:", err);
-        reportError("event_write", `aggregateLoop: ${err instanceof Error ? err.message : String(err)}`);
-      } finally {
-        // Always flush error state and prune resolved errors each cycle
-        try {
-          await flushErrors();
-          await pruneResolved();
-        } catch (e) {
-          console.error("flush/prune error", e);
-        }
-      }
-      await Bun.sleep(5000);
-    }
-  }
-
-  // Run both loops concurrently
-  await Promise.all([watcherLoop(), aggregateLoop()]);
+  console.log(`  Backfill: shipped ${totalShipped} rows`);
+  console.log("Backfill complete.\n");
 }
 
-// ─── Start ─────────────────────────────────────────────────────────────────
+// ─── Startup ────────────────────────────────────────────────────────────────
+if (IS_BACKFILL) {
+  await runBackfill();
+} else {
+  console.log("Reading log file...");
+  await detectAndFillGap();
+  console.log("  Ready — will only sync new events from this point.\n");
+}
+console.log("Daemon running (250ms watcher + 5s aggregator). Press Ctrl+C to stop.\n");
 
-main().catch((err) => {
-  console.error("Fatal error:", err);
-  process.exit(1);
-});
+// ─── Auto-close state ───────────────────────────────────────────────────────
+const AUTO_CLOSE_MS = 2 * 60 * 60 * 1000;
+let lastActiveAgentTime = Date.now();
+let autoCloseFired = false;
+
+// ─── Loop 1: Process Watcher (250ms) ────────────────────────────────────────
+const watcher = new ProcessWatcher();
+
+async function watcherLoop(): Promise<never> {
+  while (true) {
+    try {
+      const diff = watcher.tick();
+      if (diff) {
+        await pushAgentState(diff);
+        for (const event of diff.events) {
+          console.log(`  ${new Date().toLocaleTimeString()} [${event.type}] ${event.project} (pid ${event.pid})`);
+        }
+      }
+      if (watcher.activeAgents > 0) {
+        lastActiveAgentTime = Date.now();
+        autoCloseFired = false;
+      }
+      if (!autoCloseFired && Date.now() - lastActiveAgentTime > AUTO_CLOSE_MS) {
+        await setFacilitySwitch("dormant");
+        autoCloseFired = true;
+        console.log(`  ${new Date().toLocaleTimeString()} [auto-close] Facility dormant after 2h idle`);
+      }
+    } catch (err) {
+      console.error("Watcher error:", err);
+      reportError("facility_state", `watcherLoop: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    await Bun.sleep(250);
+  }
+}
+
+// ─── Loop 2: Pipeline (5s) ──────────────────────────────────────────────────
+const errMsg = (e: unknown) => e instanceof Error ? e.message : String(e);
+const time = () => new Date().toLocaleTimeString();
+let cycle = 0;
+
+async function pipelineLoop(): Promise<never> {
+  while (true) {
+    try {
+      // Collect (each receiver in its own try/catch)
+      let newEntries: import("../src/parsers").LogEntry[] = [];
+      try { newEntries = logReceiver.poll(); } catch (e) { reportError("event_write", `logReceiver: ${errMsg(e)}`); }
+
+      let tokenMap: import("../src/project/scanner").ProjectTokenMap = new Map();
+      try { tokenMap = tokenReceiver.poll(); } catch (e) { reportError("metrics_sync", `tokenReceiver: ${errMsg(e)}`); }
+
+      let metrics: import("../src/pipeline/receivers").MetricsSnapshot = { statsCache: null, modelStats: [] };
+      try { metrics = metricsReceiver.poll(); } catch (e) { reportError("metrics_sync", `metricsReceiver: ${errMsg(e)}`); }
+
+      // Process -> SQLite outbox
+      if (newEntries.length > 0) processor.processEvents(newEntries);
+      processor.processTokens(tokenMap);
+      processor.processMetrics(metrics.statsCache, metrics.modelStats);
+
+      // Ship -> Supabase
+      const result = await shipper.ship();
+      if (result.shipped > 0 || result.failed > 0) {
+        console.log(`  ${time()} — shipped ${result.shipped} rows${result.failed > 0 ? `, ${result.failed} failed` : ""}`);
+      }
+
+      // Archive (every 12 cycles / ~60s)
+      if (cycle % 12 === 0 && cycle > 0) await shipper.shipArchive();
+
+      // Periodic maintenance (every 60 cycles / ~5 min)
+      if (cycle % 60 === 0 && cycle > 0) {
+        await processor.refreshResolver();
+        await processor.refreshBaselines();
+        if (new Date().getMinutes() < 1) {
+          processor.snapshotFacilityState({
+            status: watcher.activeAgents > 0 ? "active" : "dormant",
+            activeAgents: watcher.activeAgents,
+            activeProjects: [],
+          });
+        }
+        shipper.pruneShipped(7);
+        const depth = shipper.outboxDepth();
+        if (depth > 1000) reportError("event_write", `Outbox backlog: ${depth} pending rows`);
+        await maybePruneRemoteEvents();
+      }
+      cycle++;
+    } catch (err) {
+      reportError("event_write", `pipelineLoop: ${errMsg(err)}`);
+    } finally {
+      try { await flushErrors(); await pruneResolved(); } catch {}
+    }
+    await Bun.sleep(5000);
+  }
+}
+
+// ─── Remote event pruning ───────────────────────────────────────────────────
+let lastPruneDate = "";
+async function maybePruneRemoteEvents(): Promise<void> {
+  const today = new Date().toISOString().split("T")[0];
+  if (today === lastPruneDate) return;
+  try {
+    const pruned = await pruneOldEvents(14);
+    if (pruned > 0) console.log(`  Pruned ${pruned} events older than 14 days`);
+    lastPruneDate = today;
+  } catch (err) {
+    console.error("Error pruning events:", err);
+    reportError("event_write", `maybePruneRemoteEvents: ${errMsg(err)}`);
+  }
+}
+
+// ─── Start ──────────────────────────────────────────────────────────────────
+await Promise.all([watcherLoop(), pipelineLoop()]);
