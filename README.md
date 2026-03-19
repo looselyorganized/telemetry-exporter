@@ -1,6 +1,6 @@
 # Telemetry Exporter
 
-Bun daemon that syncs Claude Code telemetry from `~/.claude/` to Supabase for the LO operations dashboard.
+Bun daemon that syncs Claude Code telemetry from `~/.claude/` to Supabase for the LO operations dashboard. Uses a local SQLite outbox for durability — data survives daemon crashes and Supabase outages.
 
 ## Setup
 
@@ -12,28 +12,52 @@ cp .env.example .env  # fill in Supabase credentials
 ## Usage
 
 ```bash
-# Incremental sync daemon (250ms watcher + 5s aggregator)
-bun run bin/daemon.ts
+# Incremental sync daemon (250ms watcher + 5s pipeline)
+bun run start
 
 # Backfill all history, then switch to daemon mode
-bun run bin/daemon.ts --backfill
+bun run backfill
 
 # Facility lifecycle
-bun run bin/lo-open.ts    # start facility + preflight checks
-bun run bin/lo-close.ts   # stop facility
-bun run bin/lo-status.ts  # cross-project backlog scanner
+bun run open              # start facility + preflight checks
+bun run close             # stop facility
+bun run status            # cross-project backlog scanner
 
 # Verification dashboard (opens localhost:7777)
-bun run bin/dashboard.ts
+bun run dashboard
 ```
+
+## Architecture
+
+```
+~/.claude/ files          SQLite (data/telemetry.db)         Supabase
+─────────────────        ─────────────────────────         ──────────
+
+  events.log ───[LogReceiver]──.
+  JSONL files ─[TokenReceiver]──┼─→ [Processor] ─→ outbox ──[Shipper]─→ events
+  stats-cache [MetricsReceiver]─┘        │         archive ──[Shipper]─→ outbox_archive
+                                         │                            ─→ projects
+                                         ▼                            ─→ daily_metrics
+                                   known_projects                     ─→ project_telemetry
+                                   cursors                            ─→ facility_status
+
+  ps/lsof ────[ProcessWatcher]────(direct)────→ facility_status (agent fields)
+                                              → project_telemetry (agent fields)
+```
+
+**Dual-loop daemon:**
+- **Process watcher (250ms)** — detects Claude process lifecycle, pushes agent state directly to Supabase
+- **Pipeline (5s)** — receivers collect data → processor writes to SQLite outbox → shipper pushes to Supabase
+
+The SQLite outbox (`data/telemetry.db`, WAL mode) provides local durability. If Supabase is down, the outbox accumulates rows and drains when connectivity returns. A circuit breaker pauses shipping after 3 consecutive failures.
 
 ## launchd (auto-start on login)
 
 The included plist keeps the exporter alive as a macOS user agent:
 
 ```bash
-ln -s "$(pwd)/com.lo.telemetry-exporter.plist" ~/Library/LaunchAgents/
-launchctl load ~/Library/LaunchAgents/com.lo.telemetry-exporter.plist
+bun run open   # symlinks plist, loads launchd, runs preflight checks
+bun run close  # unloads launchd, stops daemon
 ```
 
 Logs go to `~/.claude/lo-exporter.log` and `~/.claude/lo-exporter.err`.
@@ -56,6 +80,16 @@ Logs go to `~/.claude/lo-exporter.log` and `~/.claude/lo-exporter.err`.
 | `daily_metrics` | Global + per-project daily tokens, sessions, messages, tool calls |
 | `facility_status` | Singleton live snapshot — status, active agents, tokens, model stats |
 | `project_telemetry` | Per-project live snapshot — tokens, sessions, agent counts |
+| `outbox_archive` | Long-term archive of discrete facts (events, metrics, state snapshots) |
+
+## Dashboard
+
+The verification dashboard at `localhost:7777` provides:
+
+- `/api/health` — daemon status, Supabase connectivity, pipeline health (outbox depth, circuit breaker state)
+- `/api/outbox` — outbox depth by target, failed rows with error messages, cursor state
+- `/api/compare/*` — side-by-side comparison of outbox vs Supabase data
+- `/api/errors` — exporter error log
 
 ## Environment Variables
 

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What This Is
 
-Bun-powered TypeScript daemon that syncs Claude Code telemetry from `~/.claude/` to Supabase for the LO operations dashboard. No build step — Bun runs `.ts` files directly.
+Bun-powered TypeScript daemon that syncs Claude Code telemetry from `~/.claude/` to Supabase for the LO operations dashboard. Uses a local SQLite outbox for durability — data survives daemon crashes and Supabase outages. No build step — Bun runs `.ts` files directly.
 
 ## Commands
 
