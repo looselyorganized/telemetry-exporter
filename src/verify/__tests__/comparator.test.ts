@@ -7,8 +7,8 @@ import {
   compareProjects,
   buildHealth,
   type ComparisonResult,
+  type LocalData,
 } from "../comparator";
-import type { LocalData } from "../local-reader";
 import type { RemoteData } from "../remote-reader";
 
 // ─── Test helpers ───────────────────────────────────────────────────────────

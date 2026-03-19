@@ -2,38 +2,11 @@
  * Shared type definitions for the DB layer.
  */
 
-import type { ModelStats } from "../parsers";
-
-/** Aggregate metrics for the facility status row. */
-export interface FacilityMetrics {
-  tokensLifetime: number;
-  tokensToday: number;
-  sessionsLifetime: number;
-  messagesLifetime: number;
-  modelStats: Record<string, Omit<ModelStats, "model">>;
-  hourDistribution: Record<string, number>;
-  firstSessionDate: string | null;
-}
-
-export interface InsertEventsResult {
-  inserted: number;
-  errors: number;
-  insertedByProject: Record<string, number>;
-}
-
 /** project → date → { sessions, messages, toolCalls, agentSpawns, teamMessages } */
 export type ProjectEventAggregates = Map<
   string,
   Map<string, { sessions: number; messages: number; toolCalls: number; agentSpawns: number; teamMessages: number }>
 >;
-
-export interface FacilityUpdate extends FacilityMetrics {
-  status: "active" | "dormant";
-  activeAgents: number;
-  activeProjects: Array<{ name: string; active: boolean }>;
-}
-
-export type FacilityMetricsUpdate = FacilityMetrics;
 
 export interface ProjectTelemetryUpdate {
   projId: string;
@@ -52,4 +25,24 @@ export interface ProjectTelemetryUpdate {
 /** Format a token count as a human-readable string (e.g. "12.3M"). */
 export function formatTokens(n: number): string {
   return (n / 1e6).toFixed(1) + "M";
+}
+
+export interface ShipResult {
+  shipped: number;
+  failed: number;
+  retriesScheduled: number;
+  circuitBreakerState: "closed" | "open" | "half-open";
+  byTarget: Record<string, { shipped: number; failed: number }>;
+}
+
+export interface ShippingStrategy {
+  table: string;
+  method: "upsert" | "update";
+  onConflict?: string;
+  filter?: Record<string, unknown>;
+  ignoreDuplicates?: boolean;
+  excludeFields?: string[];
+  batchSize: number;
+  fallbackToPerRow: boolean;
+  priority: number;
 }

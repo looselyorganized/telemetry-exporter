@@ -6,3 +6,4 @@ node_modules/
 .slug-mapping.json
 .visibility-cache.json
 .name-cache.json
+data/

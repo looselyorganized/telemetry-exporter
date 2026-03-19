@@ -3,8 +3,20 @@
  * Produces discrepancy lists with severity levels.
  */
 
-import type { LocalData } from "./local-reader";
 import type { RemoteData } from "./remote-reader";
+
+// ─── LocalData type (owned here; local-reader.ts is deleted) ────────────────
+
+export interface LocalData {
+  events: { byProjectDate: Record<string, Record<string, number>>; totalCount: number };
+  metrics: { dailyActivity: Array<{ date: string; messages: number; sessions: number; toolCalls: number }> };
+  tokens: { byProject: Record<string, number> };
+  models: { stats: Array<{ model: string; total: number; input: number; cacheWrite: number; cacheRead: number; output: number }> };
+  projects: Array<{ dirName: string; slug: string; projId: string | null }>;
+  hourDistribution: Record<string, number>;
+  daemon: { running: boolean; pid: number | null };
+  logStartDate: Date | null;
+}
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 

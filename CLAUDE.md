@@ -18,42 +18,57 @@ bun run status                       # cross-project backlog scanner
 bun run dashboard                    # verification dashboard (localhost:7777)
 ```
 
-No linter, no tsconfig. Single dependency: `@supabase/supabase-js`. Tests: `bun test`.
+No linter, no tsconfig. Dependencies: `@supabase/supabase-js` + `bun:sqlite` (built-in). Tests: `bun test`.
 
 ## Architecture
 
-Dual-loop daemon (`bin/daemon.ts`):
-- **Process watcher (250ms)** — detects Claude process lifecycle via `ps`/`lsof`, pushes agent state changes immediately
-- **Aggregator (5s)** — tails `events.log`, scans JSONL session files, syncs tokens/sessions/events to Supabase
+Pipeline daemon (`bin/daemon.ts`, ~270 lines) with dual loops:
+- **Process watcher (250ms)** — detects Claude process lifecycle via `ps`/`lsof`, pushes agent state directly to Supabase
+- **Pipeline (5s)** — Receivers collect data → Processor writes to SQLite outbox → Shipper pushes to Supabase
+
+Data flows through a local SQLite outbox (`data/telemetry.db`, WAL mode) for durability. If the daemon crashes or Supabase is down, unshipped rows persist and drain on next startup.
 
 ### Module Layout
 
 ```
 bin/           Entry points (daemon, lo-open, lo-close, lo-status, dashboard)
-src/           Library code
-  parsers.ts           Log/stats file readers
-  sync.ts              All Supabase writes (largest file)
-  cli-output.ts        ANSI status reporting, .env loading, path constants
-  visibility-cache.ts  GitHub repo visibility via `gh repo list`
+src/
+  pipeline/
+    receivers.ts       LogReceiver, TokenReceiver, MetricsReceiver (wrap existing parsers)
+    processor.ts       Resolves projects, aggregates, deduplicates, writes to SQLite outbox
+    shipper.ts         Reads outbox, ships to Supabase per strategy dispatch, circuit breaker
+  db/
+    local.ts           SQLite init, outbox CRUD, cursor persistence, archive queue, prune
+    client.ts          Supabase client singleton
+    agent-state.ts     Direct agent state push (watcher → Supabase, bypasses outbox)
+    types.ts           Shared type definitions
   process/
     scanner.ts         Detects running Claude processes, resolves CWDs
     watcher.ts         Sliding-window activity detection (40 ticks × 250ms)
   project/
+    resolver.ts        Maps directory names → proj_ IDs via lo.yml + name cache
     scanner.ts         JSONL token aggregation from ~/.claude/projects/
     slug-resolver.ts   Maps directory paths → project id via git remote URL
   verify/
-    local-reader.ts    Reads all local telemetry sources for dashboard
+    outbox-reader.ts   Reads SQLite outbox for dashboard comparison
     remote-reader.ts   Queries Supabase tables for dashboard comparison
-    comparator.ts      Diffs local vs remote, produces discrepancy lists
+    comparator.ts      Diffs outbox vs remote, produces discrepancy lists
+  parsers.ts           Log/stats file readers
+  errors.ts            In-memory error aggregation (flushed directly, not through outbox)
+  cli-output.ts        ANSI status reporting, .env loading, path constants
+  visibility-cache.ts  GitHub repo visibility via `gh repo list`
+data/
+  telemetry.db         SQLite database (gitignored, WAL mode)
 ```
 
 ### Key Data Flow
 
-1. `parsers.ts` reads `~/.claude/events.log` (pipe-delimited, emoji-tagged lines)
-2. `project/resolver.ts` maps directory names → `proj_` IDs using (in priority order): `lo.yml` files, git remote URL + Supabase slug lookup, `.name-cache.json` for renamed dirs
-3. `project/scanner.ts` scans `~/.claude/projects/*/` JSONL files for per-project token usage
-4. `process/scanner.ts` → `process/watcher.ts` detects running Claude instances and activity state
-5. `sync.ts` pushes everything to Supabase tables: `events`, `projects`, `daily_metrics`, `facility_status`, `project_telemetry`
+1. **Receivers** read `~/.claude/` sources: `events.log` (LogReceiver), JSONL session files (TokenReceiver), `stats-cache.json` + `model-stats` (MetricsReceiver)
+2. `project/resolver.ts` maps directory names → `proj_` IDs using `lo.yml` files + `.name-cache.json`
+3. **Processor** resolves projects, aggregates tokens/events, writes to SQLite outbox in transactions
+4. **Shipper** reads unshipped outbox rows, ships to Supabase per target (projects → events → daily_metrics → project_telemetry → facility_metrics), with exponential backoff and circuit breaker
+5. **Process watcher** (separate 250ms loop) pushes agent state directly to Supabase (bypasses outbox)
+6. **Archive shipper** sends discrete facts (events, daily metrics, state snapshots) to `outbox_archive` in Supabase for long-term history
 
 ### Project Identity
 
