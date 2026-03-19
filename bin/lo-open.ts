@@ -34,7 +34,7 @@ import {
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
-const SITE_URL = "https://looselyorganized.org";
+const SITE_URL = "https://looselyorganized-production.up.railway.app";
 const ERR_LOG = `${process.env.HOME!}/.claude/lo-exporter.err`;
 
 // ─── Check Implementations ──────────────────────────────────────────────────
