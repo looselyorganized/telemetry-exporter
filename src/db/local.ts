@@ -151,6 +151,16 @@ export function markFailed(ids: number[], error: string): void {
 }
 
 /**
+ * Delete all permanently failed rows from the outbox.
+ * Safe because dequeueUnshipped only picks up 'pending' rows.
+ */
+export function purgeFailed(): number {
+  const db = getLocal();
+  const result = db.run("DELETE FROM outbox WHERE status = 'failed'");
+  return result.changes;
+}
+
+/**
  * Record a transient error: increment retry_count, set error and last_error_at.
  * If retry_count reaches 10, permanently fail the row.
  */

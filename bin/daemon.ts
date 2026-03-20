@@ -19,7 +19,7 @@ import { ProjectResolver } from "../src/project/resolver";
 import { reportError, clearErrors } from "../src/errors";
 import { flushErrors, pruneResolved, clearErrorsTable } from "../src/db/errors";
 import { PID_FILE, isProcessRunning } from "../src/cli-output";
-import { initLocal, getLocal, closeLocal } from "../src/db/local";
+import { initLocal, getLocal, closeLocal, purgeFailed } from "../src/db/local";
 import { LogReceiver, TokenReceiver, MetricsReceiver } from "../src/pipeline/receivers";
 import { Processor } from "../src/pipeline/processor";
 import { Shipper } from "../src/pipeline/shipper";
@@ -83,6 +83,8 @@ const DB_PATH = join(DB_DIR, "telemetry.db");
 mkdirSync(DB_DIR, { recursive: true });
 initLocal(DB_PATH);
 console.log(`  SQLite: ${DB_PATH}`);
+const purged = purgeFailed();
+if (purged > 0) console.log(`  Purged ${purged} permanently failed outbox rows`);
 
 clearErrors();
 await clearErrorsTable();

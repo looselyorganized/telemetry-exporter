@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { unlinkSync, existsSync } from "fs";
 import { Database } from "bun:sqlite";
-import { initLocal, getLocal, closeLocal } from "../local";
+import { initLocal, getLocal, closeLocal, enqueue, purgeFailed } from "../local";
 
 const TEST_DB_PATH = "/tmp/lo-test-outbox.db";
 
@@ -702,5 +702,28 @@ describe("archiveDepth", () => {
     const rows = dequeueUnshippedArchive(10);
     markArchiveShipped([rows[0].id]);
     expect(archiveDepth()).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Purge failed rows
+// ---------------------------------------------------------------------------
+
+describe("purgeFailed", () => {
+  it("deletes failed rows and returns count", () => {
+    initLocal(TEST_DB_PATH);
+
+    enqueue("projects", { id: "proj_1" });
+    enqueue("projects", { id: "proj_2" });
+    enqueue("events", { id: "ev_1" });
+
+    const db = getLocal();
+    db.run("UPDATE outbox SET status = 'failed' WHERE id IN (1, 2)");
+
+    const purged = purgeFailed();
+    expect(purged).toBe(2);
+
+    const remaining = db.query("SELECT * FROM outbox").all();
+    expect(remaining).toHaveLength(1);
   });
 });
