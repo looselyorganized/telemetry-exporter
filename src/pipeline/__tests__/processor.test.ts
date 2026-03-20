@@ -785,37 +785,23 @@ describe("Processor.processMetrics", () => {
 function makeMockSupabase(telemetryRows: any[], dailyRows: any[], error: any = null) {
   return {
     from: (table: string) => ({
-      select: (..._args: any[]) => ({
-        not: (..._notArgs: any[]) =>
-          Promise.resolve({
-            data: table === "project_telemetry" ? telemetryRows : dailyRows,
-            error,
-          }),
-      }),
+      select: (..._args: any[]) =>
+        Promise.resolve({
+          data: table === "project_telemetry" ? telemetryRows : dailyRows,
+          error,
+        }),
     }),
   };
 }
 
-/** Simple mock Supabase for project_telemetry only (select returns data directly). */
 function makeTelemetryOnlyMockSupabase(telemetryRows: any[], error: any = null) {
-  // project_telemetry.select() does NOT chain .not() — but refreshBaselines also
-  // calls daily_metrics with .not(). We need a flexible mock.
   return {
     from: (table: string) => ({
-      select: (..._args: any[]) => {
-        if (table === "project_telemetry") {
-          // project_telemetry select returns a chainable that resolves via .not()
-          return {
-            not: (..._notArgs: any[]) =>
-              Promise.resolve({ data: telemetryRows, error }),
-          };
-        }
-        // daily_metrics
-        return {
-          not: (..._notArgs: any[]) =>
-            Promise.resolve({ data: [], error }),
-        };
-      },
+      select: (..._args: any[]) =>
+        Promise.resolve({
+          data: table === "project_telemetry" ? telemetryRows : [],
+          error,
+        }),
     }),
   };
 }
@@ -898,9 +884,7 @@ describe("Processor.hydrate", () => {
   test("falls back to empty baselines on Supabase failure", async () => {
     const mockSupabase = {
       from: () => ({
-        select: () => ({
-          not: () => Promise.resolve({ data: null, error: new Error("network fail") }),
-        }),
+        select: () => Promise.resolve({ data: null, error: new Error("network fail") }),
       }),
     };
     const spy = spyOn(clientModule, "getSupabase").mockReturnValue(mockSupabase as any);

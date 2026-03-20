@@ -335,8 +335,7 @@ export class Processor {
         .from("project_telemetry")
         .select(
           "project_id, tokens_lifetime, sessions_lifetime, messages_lifetime, tool_calls_lifetime, agent_spawns_lifetime, team_messages_lifetime"
-        )
-        .not("project_id", "is", null);
+        );
 
       if (telemetryError || !telemetryRows) {
         console.warn("[processor] hydrate: Supabase project_telemetry query failed — using zero baselines");
@@ -351,8 +350,7 @@ export class Processor {
       // 2. Load lifetime event counters from daily_metrics
       const { data: dailyRows, error: dailyError } = await supabase
         .from("daily_metrics")
-        .select("project_id, sessions, messages, tool_calls, agent_spawns, team_messages")
-        .not("project_id", "is", null);
+        .select("project_id, sessions, messages, tool_calls, agent_spawns, team_messages");
 
       if (dailyError || !dailyRows) {
         // Non-fatal: token baselines loaded, lifetime counters default to zero
