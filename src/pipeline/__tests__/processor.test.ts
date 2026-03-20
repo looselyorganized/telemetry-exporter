@@ -644,17 +644,50 @@ describe("Processor.processMetrics", () => {
     expect(payload.updated_at).toMatch(/^\d{4}-\d{2}-\d{2}T/);
   });
 
-  test("enqueues global daily_metrics to outbox", () => {
+  test("tokens_today comes from tokenMap, not statsCache", () => {
     const resolver = new MockResolver({});
     const processor = new Processor(resolver as any, db);
 
     const today = todayStr();
+
+    const tokenMap: ProjectTokenMap = new Map([
+      ["proj_aaa", new Map([
+        [today, { "claude-opus-4-6": 5000, "claude-haiku-4-5": 3000 }],
+      ])],
+    ]);
+
+    processor.processTokens(tokenMap);
+
+    const statsCache: StatsCache = {
+      dailyActivity: [],
+      dailyModelTokens: [],
+      modelUsage: {},
+      totalSessions: 0,
+      totalMessages: 0,
+      firstSessionDate: null,
+      hourCounts: {},
+    };
+    processor.processMetrics(statsCache, []);
+
+    const rows = db
+      .query("SELECT * FROM outbox WHERE target = 'facility_metrics'")
+      .all() as any[];
+    expect(rows).toHaveLength(1);
+
+    const payload = JSON.parse(rows[0].payload);
+    expect(payload.tokens_today).toBe(8000);
+  });
+
+  test("does not enqueue global daily_metrics rows", () => {
+    const resolver = new MockResolver({});
+    const processor = new Processor(resolver as any, db);
+
     const statsCache: StatsCache = {
       dailyActivity: [
-        { date: today, messageCount: 5, sessionCount: 2, toolCallCount: 12 },
+        { date: todayStr(), messageCount: 5, sessionCount: 2, toolCallCount: 12 },
       ],
       dailyModelTokens: [
-        { date: today, tokensByModel: { "claude-opus-4-20250514": 8000 } },
+        { date: todayStr(), tokensByModel: { "claude-opus-4-6": 8000 } },
       ],
       modelUsage: {},
       totalSessions: 10,
@@ -662,20 +695,13 @@ describe("Processor.processMetrics", () => {
       firstSessionDate: "2025-01-01",
       hourCounts: {},
     };
-    const modelStats: ModelStats[] = [];
 
-    processor.processMetrics(statsCache, modelStats);
+    processor.processMetrics(statsCache, []);
 
     const rows = db
       .query("SELECT * FROM outbox WHERE target = 'daily_metrics'")
       .all() as any[];
-
-    // Should have at least one global (null project_id) daily_metrics row
-    const globalRows = rows.filter((r: any) => {
-      const p = JSON.parse(r.payload);
-      return p.project_id === null;
-    });
-    expect(globalRows.length).toBeGreaterThanOrEqual(1);
+    expect(rows).toHaveLength(0);
   });
 
   test("skips enqueue when metrics hash hasn't changed", () => {
