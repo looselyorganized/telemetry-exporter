@@ -162,6 +162,33 @@ describe("Processor.processEvents", () => {
     expect(payload.timestamp).toBe("2026-03-19T10:00:00.000Z");
   });
 
+  test("project activity updates include slug", () => {
+    const resolver = new MockResolver({
+      "my-project": { projId: "proj_aaa", slug: "my-project" },
+    });
+    const processor = new Processor(resolver as any, db);
+    processor.loadKnownProjects();
+
+    const entries: LogEntry[] = [
+      makeEntry({ project: "my-project", eventType: "session_start", eventText: "Started", parsedTimestamp: new Date("2026-03-19T10:00:00.000Z") }),
+    ];
+    processor.processEvents(entries);
+
+    const rows = db
+      .query("SELECT * FROM outbox WHERE target = 'projects' ORDER BY id")
+      .all() as any[];
+
+    const activityRow = rows.find((r: any) => {
+      const p = JSON.parse(r.payload);
+      return p.last_active !== undefined;
+    });
+    expect(activityRow).toBeDefined();
+    const payload = JSON.parse(activityRow!.payload);
+    expect(payload.slug).toBe("my-project");
+    expect(payload.id).toBe("proj_aaa");
+    expect(payload.last_active).toBeDefined();
+  });
+
   test("enqueues project activity updates with last_active", () => {
     const resolver = new MockResolver({
       "my-project": { projId: "proj_abc123", slug: "my-project" },

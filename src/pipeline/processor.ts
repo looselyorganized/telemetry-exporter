@@ -94,8 +94,14 @@ export class Processor {
         }
       }
 
+      // Build slug lookup from resolved entries
+      const slugByProject = new Map<string, string>();
+      for (const { projId, slug } of resolved) {
+        slugByProject.set(projId, slug);
+      }
+
       for (const [projId, lastActive] of latestByProject) {
-        enqueue("projects", { id: projId, last_active: lastActive });
+        enqueue("projects", { id: projId, slug: slugByProject.get(projId), last_active: lastActive });
       }
     })();
   }
