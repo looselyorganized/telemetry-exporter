@@ -14,7 +14,6 @@ bun run start                        # run daemon (incremental sync)
 bun run backfill                     # backfill all history, then daemon
 bun run open                         # facility startup with preflight checks
 bun run close                        # graceful facility shutdown
-bun run status                       # cross-project backlog scanner
 bun run dashboard                    # verification dashboard (localhost:7777)
 ```
 
@@ -31,7 +30,7 @@ Data flows through a local SQLite outbox (`data/telemetry.db`, WAL mode) for dur
 ### Module Layout
 
 ```
-bin/           Entry points (daemon, lo-open, lo-close, lo-status, dashboard)
+bin/           Entry points (daemon, lo-open, lo-close, dashboard)
 src/
   pipeline/
     receivers.ts       LogReceiver, TokenReceiver, MetricsReceiver (wrap existing parsers)

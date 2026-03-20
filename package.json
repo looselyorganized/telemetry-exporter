@@ -8,7 +8,6 @@
     "backfill": "bun run bin/daemon.ts --backfill",
     "open": "bun run bin/lo-open.ts",
     "close": "bun run bin/lo-close.ts",
-    "status": "bun run bin/lo-status.ts",
     "dashboard": "bun run bin/dashboard.ts",
     "test": "bun test"
   },

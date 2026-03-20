@@ -122,7 +122,7 @@ export function clearSlugCache(): void {
 }
 
 // ---------------------------------------------------------------------------
-// id resolution (uses git remote URL — replaces .lo/PROJECT.md reading)
+// id resolution (uses git remote URL)
 // ---------------------------------------------------------------------------
 
 /**

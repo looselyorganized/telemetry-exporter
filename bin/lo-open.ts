@@ -29,7 +29,6 @@ import {
   printOpenBanner,
   isProcessRunning,
   loadEnv,
-  getLoPluginVersion,
 } from "../src/cli-output";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -402,9 +401,7 @@ async function main(): Promise<void> {
 
   console.log();
   console.log(`  ${DIM}── Facility Open ──────────────────────${RESET}`);
-  console.log(`  ${BOLD}lo-plugin:${RESET} v${getLoPluginVersion()}`);
   console.log(`  ${BOLD}Exporter:${RESET} PID ${pid} (launchd managed)`);
-  console.log(`  ${DIM}Run lo-status for project backlogs${RESET}`);
   console.log();
 }
 
