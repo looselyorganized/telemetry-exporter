@@ -96,18 +96,26 @@ async function readRemoteMetrics(supabase: SupabaseClient): Promise<{ data: Remo
   const { data, error } = await supabase
     .from("daily_metrics")
     .select("date, messages, sessions, tool_calls")
-    .is("project_id", null)
     .order("date", { ascending: true });
 
   if (error || !data) return { data: { dailyActivity: [] }, ok: false };
 
+  // Aggregate per-project rows by date (same pattern as platform's getDailyActivity)
+  const byDate = new Map<string, { messages: number; sessions: number; toolCalls: number }>();
+  for (const row of data) {
+    const date = row.date as string;
+    const existing = byDate.get(date) ?? { messages: 0, sessions: 0, toolCalls: 0 };
+    existing.messages += Number(row.messages) || 0;
+    existing.sessions += Number(row.sessions) || 0;
+    existing.toolCalls += Number(row.tool_calls) || 0;
+    byDate.set(date, existing);
+  }
+
   return {
     data: {
-      dailyActivity: data.map((row) => ({
-        date: row.date as string,
-        messages: Number(row.messages) || 0,
-        sessions: Number(row.sessions) || 0,
-        toolCalls: Number(row.tool_calls) || 0,
+      dailyActivity: Array.from(byDate.entries()).map(([date, counts]) => ({
+        date,
+        ...counts,
       })),
     },
     ok: true,
