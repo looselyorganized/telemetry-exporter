@@ -155,6 +155,22 @@ if (IS_BACKFILL) {
 } else {
   console.log("Reading log file...");
   await detectAndFillGap();
+
+  // Always run one synchronous pipeline cycle before starting the concurrent
+  // loops. This ensures tokens_today is correct in Supabase before the watcher
+  // starts updating updated_at (which makes the frontend think data is fresh).
+  // Note: log events are already handled by detectAndFillGap() above.
+  const initialTokenMap = tokenReceiver.poll();
+  processor.processTokens(initialTokenMap);
+  processor.processMetrics(readStatsCache(), readModelStats());
+
+  let startupShipped = 0;
+  while (shipper.outboxDepth() > 0) {
+    startupShipped += (await shipper.ship()).shipped;
+    await Bun.sleep(100);
+  }
+  if (startupShipped > 0) console.log(`  Startup sync: shipped ${startupShipped} rows`);
+
   console.log("  Ready — will only sync new events from this point.\n");
 }
 console.log("Daemon running (250ms watcher + 5s aggregator). Press Ctrl+C to stop.\n");
