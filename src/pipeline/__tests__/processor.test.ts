@@ -678,6 +678,50 @@ describe("Processor.processMetrics", () => {
     expect(payload.tokens_today).toBe(8000);
   });
 
+  test("tokens_today survives processTokens baseline early-return", () => {
+    const resolver = new MockResolver({});
+    const processor = new Processor(resolver as any, db);
+
+    const today = todayStr();
+    const tokenMap: ProjectTokenMap = new Map([
+      ["proj_aaa", new Map([
+        [today, { "claude-opus-4-6": 5000, "claude-haiku-4-5": 3000 }],
+      ])],
+    ]);
+
+    // First call: sets todayTokensTotal AND updates baseline
+    processor.processTokens(tokenMap);
+
+    // Second call with identical data: baseline matches → early return
+    // But todayTokensTotal must still be 8000, not reset to 0
+    processor.processTokens(tokenMap);
+
+    // Verify by calling processMetrics and checking the enqueued payload
+    const statsCache: StatsCache = {
+      dailyActivity: [],
+      dailyModelTokens: [],
+      modelUsage: {},
+      totalSessions: 0,
+      totalMessages: 0,
+      firstSessionDate: null,
+      hourCounts: {},
+    };
+
+    // Clear any facility_metrics from the first processTokens+processMetrics cycle
+    db.query("DELETE FROM outbox WHERE target = 'facility_metrics'").run();
+
+    // Force a new hash by changing a statsCache field
+    processor.processMetrics({ ...statsCache, totalSessions: 99 }, []);
+
+    const rows = db
+      .query("SELECT * FROM outbox WHERE target = 'facility_metrics'")
+      .all() as any[];
+    expect(rows).toHaveLength(1);
+
+    const payload = JSON.parse(rows[0].payload);
+    expect(payload.tokens_today).toBe(8000);
+  });
+
   test("does not enqueue global daily_metrics rows", () => {
     const resolver = new MockResolver({});
     const processor = new Processor(resolver as any, db);
