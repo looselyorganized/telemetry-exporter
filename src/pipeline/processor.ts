@@ -313,6 +313,22 @@ export class Processor {
     this.processMetrics(statsCache, modelStats);
   }
 
+  /**
+   * Return the current facility metrics snapshot for direct Supabase push
+   * at startup. Returns null if processTokens hasn't been called yet.
+   */
+  getStartupMetrics(): { tokens_today: number; tokens_lifetime: number; updated_at: string } | null {
+    let tokensLifetime = 0;
+    for (const total of this.tokenBaseline.values()) {
+      tokensLifetime += total;
+    }
+    return {
+      tokens_today: this.todayTokensTotal,
+      tokens_lifetime: tokensLifetime,
+      updated_at: new Date().toISOString(),
+    };
+  }
+
   /** Refresh token and lifetime baselines from Supabase. */
   async refreshBaselines(): Promise<void> {
     await this._loadBaselinesFromSupabase();

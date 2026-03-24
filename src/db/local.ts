@@ -108,21 +108,47 @@ export function enqueue(target: string, payload: unknown): number {
 }
 
 /**
- * Return up to `limit` pending rows whose backoff window has elapsed,
- * ordered by id ascending.
+ * Base WHERE clause for pending rows whose backoff window has elapsed.
+ */
+const PENDING_WHERE = `status = 'pending'
+  AND (last_error_at IS NULL
+       OR (julianday('now') - julianday(last_error_at)) * 86400 >= min(power(2, retry_count), 60))`;
+
+/**
+ * Return up to `limit` pending rows whose backoff window has elapsed.
+ *
+ * Uses priority-aware dequeue: non-event targets (projects, daily_metrics,
+ * project_telemetry, facility_metrics) are fetched first, then events fill
+ * the remaining slots. This prevents high-volume events from starving
+ * higher-priority targets via head-of-line blocking.
  */
 export function dequeueUnshipped(limit: number): OutboxRow[] {
   const db = getLocal();
-  return db
+
+  // 1. Fetch all non-event pending rows (usually a handful)
+  const priority = db
     .query<OutboxRow, [number]>(
       `SELECT * FROM outbox
-       WHERE status = 'pending'
-         AND (last_error_at IS NULL
-              OR (julianday('now') - julianday(last_error_at)) * 86400 >= min(power(2, retry_count), 60))
+       WHERE ${PENDING_WHERE} AND target != 'events'
        ORDER BY id
        LIMIT ?`
     )
     .all(limit);
+
+  const remaining = limit - priority.length;
+  if (remaining <= 0) return priority.slice(0, limit);
+
+  // 2. Fill remaining slots with events
+  const events = db
+    .query<OutboxRow, [number]>(
+      `SELECT * FROM outbox
+       WHERE ${PENDING_WHERE} AND target = 'events'
+       ORDER BY id
+       LIMIT ?`
+    )
+    .all(remaining);
+
+  return [...priority, ...events];
 }
 
 /**

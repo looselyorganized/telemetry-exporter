@@ -156,20 +156,33 @@ if (IS_BACKFILL) {
   console.log("Reading log file...");
   await detectAndFillGap();
 
-  // Always run one synchronous pipeline cycle before starting the concurrent
-  // loops. This ensures tokens_today is correct in Supabase before the watcher
-  // starts updating updated_at (which makes the frontend think data is fresh).
-  // Note: log events are already handled by detectAndFillGap() above.
+  // Compute tokens and push directly to Supabase — bypasses the outbox so
+  // the website has a correct tokens_today before the pipeline loop starts.
+  // Log events are already handled by detectAndFillGap() above.
   const initialTokenMap = tokenReceiver.poll();
   processor.processTokens(initialTokenMap);
   processor.processMetrics(readStatsCache(), readModelStats());
 
+  const startupMetrics = processor.getStartupMetrics();
+  if (startupMetrics) {
+    const { error } = await getSupabase()
+      .from("facility_status")
+      .update(startupMetrics)
+      .eq("id", 1);
+    if (error) {
+      console.warn(`  Startup sync failed: ${error.message}`);
+    } else {
+      console.log(`  Startup sync: pushed tokens_today=${startupMetrics.tokens_today} directly`);
+    }
+  }
+
+  // Drain any outbox rows from gap detection or startup processing
   let startupShipped = 0;
   while (shipper.outboxDepth() > 0) {
     startupShipped += (await shipper.ship()).shipped;
     await Bun.sleep(100);
   }
-  if (startupShipped > 0) console.log(`  Startup sync: shipped ${startupShipped} rows`);
+  if (startupShipped > 0) console.log(`  Startup drain: shipped ${startupShipped} outbox rows`);
 
   console.log("  Ready — will only sync new events from this point.\n");
 }
