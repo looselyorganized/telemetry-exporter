@@ -36,15 +36,19 @@ interface JsonlFile {
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
-/** Read subdirectory names from PROJECT_ROOT, sorted longest-first for prefix matching. */
+/** Read subdirectory names from PROJECT_ROOT and archive/, sorted longest-first for prefix matching. */
 function readProjectDirs(): string[] {
-  try {
-    return readdirSync(PROJECT_ROOT)
-      .filter((d) => isDirectory(join(PROJECT_ROOT, d)))
-      .sort((a, b) => b.length - a.length);
-  } catch {
-    return [];
+  const dirs = new Set<string>();
+  for (const root of [PROJECT_ROOT, join(PROJECT_ROOT, "archive")]) {
+    try {
+      for (const d of readdirSync(root)) {
+        if (isDirectory(join(root, d))) dirs.add(d);
+      }
+    } catch {
+      // root doesn't exist or isn't readable
+    }
   }
+  return [...dirs].sort((a, b) => b.length - a.length);
 }
 
 /** Get or create a value in a Map, inserting `defaultValue()` if the key is absent. */

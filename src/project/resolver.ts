@@ -149,22 +149,26 @@ export class ProjectResolver {
     clearProjIdCache();
     const slugMap = buildSlugMap();
 
-    // 1. lo.yml — only resolution path for projects
-    try {
-      const dirs = readdirSync(PROJECT_ROOT).filter((d) =>
-        isDirectory(join(PROJECT_ROOT, d))
-      );
+    // 1. lo.yml — scan PROJECT_ROOT and archive/ for project identity
+    const scanRoots = [PROJECT_ROOT, join(PROJECT_ROOT, "archive")];
+    for (const root of scanRoots) {
+      try {
+        const dirs = readdirSync(root).filter((d) =>
+          isDirectory(join(root, d))
+        );
 
-      for (const dirName of dirs) {
-        const projId = readLoYml(join(PROJECT_ROOT, dirName));
-        if (projId) {
-          const slug = slugMap.get(dirName) ?? dirName;
-          newMap.set(dirName, { projId, slug });
-          fromLoYml++;
+        for (const dirName of dirs) {
+          if (newMap.has(dirName)) continue; // active project wins over archived
+          const projId = readLoYml(join(root, dirName));
+          if (projId) {
+            const slug = slugMap.get(dirName) ?? dirName;
+            newMap.set(dirName, { projId, slug });
+            fromLoYml++;
+          }
         }
+      } catch {
+        // root doesn't exist or isn't readable
       }
-    } catch {
-      // PROJECT_ROOT doesn't exist or isn't readable
     }
 
     // Snapshot live-resolved keys before loading cache (for lastSeen tracking)
