@@ -27,6 +27,8 @@ export class Processor {
   private lastProjectSync: string = "";
   private lastSnapshotTime: number = 0;
   private todayTokensTotal: number = 0;
+  private lastDailyPayloads: Map<string, string> = new Map();
+  private lastTelemetryPayloads: Map<string, string> = new Map();
 
   constructor(resolver: ProjectResolver, db: Database) {
     this.resolver = resolver;
@@ -208,6 +210,13 @@ export class Processor {
             agent_spawns: evCounts?.agent_spawns ?? 0,
             team_messages: evCounts?.team_messages ?? 0,
           };
+
+          // Skip if payload is identical to what was last enqueued for this (project, date)
+          const dailyJson = JSON.stringify(payload);
+          const dailyKey = `${projId}\0${date}`;
+          if (this.lastDailyPayloads.get(dailyKey) === dailyJson) continue;
+          this.lastDailyPayloads.set(dailyKey, dailyJson);
+
           enqueue("daily_metrics", payload);
 
           // Archive with content hash
@@ -247,7 +256,7 @@ export class Processor {
         const counters = lifetimeCounters[projId] ?? {
           sessions: 0, messages: 0, toolCalls: 0, agentSpawns: 0, teamMessages: 0,
         };
-        enqueue("project_telemetry", {
+        const telemetryPayload = {
           project_id: projId,
           tokens_lifetime: tokensByProject[projId] ?? 0,
           tokens_today: todayData.total,
@@ -257,7 +266,14 @@ export class Processor {
           tool_calls_lifetime: counters.toolCalls,
           agent_spawns_lifetime: counters.agentSpawns,
           team_messages_lifetime: counters.teamMessages,
-        });
+        };
+
+        // Skip if payload is identical to what was last enqueued for this project
+        const telemetryJson = JSON.stringify(telemetryPayload);
+        if (this.lastTelemetryPayloads.get(projId) === telemetryJson) continue;
+        this.lastTelemetryPayloads.set(projId, telemetryJson);
+
+        enqueue("project_telemetry", telemetryPayload);
       }
 
       // 8. Update baselines

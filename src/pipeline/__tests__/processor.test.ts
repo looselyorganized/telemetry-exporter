@@ -538,6 +538,76 @@ describe("Processor.processTokens", () => {
     expect(countAfterSecond).toBeGreaterThan(countAfterFirst);
   });
 
+  test("skips re-enqueue for unchanged project when another project changes", () => {
+    const resolver = new MockResolver({});
+    const processor = new Processor(resolver as any, db);
+
+    const today = todayStr();
+
+    // Call 1: one project
+    const tokenMap1 = makeTokenMap({
+      proj_stable: { [today]: { "claude-opus-4-20250514": 5000 } },
+    });
+    processor.processTokens(tokenMap1);
+    const countAfterFirst = (
+      db.query("SELECT COUNT(*) as c FROM outbox WHERE target = 'daily_metrics'").get() as any
+    ).c;
+    expect(countAfterFirst).toBe(1);
+
+    // Call 2: same project unchanged, but a NEW project appears (lifetime changes)
+    const tokenMap2 = makeTokenMap({
+      proj_stable: { [today]: { "claude-opus-4-20250514": 5000 } },
+      proj_new: { [today]: { "claude-opus-4-20250514": 3000 } },
+    });
+    processor.processTokens(tokenMap2);
+
+    // Should only enqueue for proj_new, not re-enqueue proj_stable
+    const rows = db
+      .query("SELECT * FROM outbox WHERE target = 'daily_metrics'")
+      .all() as any[];
+    expect(rows.length).toBe(2); // 1 original + 1 new, NOT 3
+
+    const payloads = rows.map((r: any) => JSON.parse(r.payload));
+    const stableRows = payloads.filter((p: any) => p.project_id === "proj_stable");
+    const newRows = payloads.filter((p: any) => p.project_id === "proj_new");
+    expect(stableRows.length).toBe(1);
+    expect(newRows.length).toBe(1);
+  });
+
+  test("skips re-enqueue for unchanged project_telemetry", () => {
+    const resolver = new MockResolver({});
+    const processor = new Processor(resolver as any, db);
+
+    const today = todayStr();
+
+    // Call 1: one project
+    const tokenMap1 = makeTokenMap({
+      proj_stable: { [today]: { "claude-opus-4-20250514": 5000 } },
+    });
+    processor.processTokens(tokenMap1);
+    const countAfterFirst = (
+      db.query("SELECT COUNT(*) as c FROM outbox WHERE target = 'project_telemetry'").get() as any
+    ).c;
+    expect(countAfterFirst).toBe(1);
+
+    // Call 2: same project unchanged, new project appears
+    const tokenMap2 = makeTokenMap({
+      proj_stable: { [today]: { "claude-opus-4-20250514": 5000 } },
+      proj_new: { [today]: { "claude-opus-4-20250514": 3000 } },
+    });
+    processor.processTokens(tokenMap2);
+
+    const rows = db
+      .query("SELECT * FROM outbox WHERE target = 'project_telemetry'")
+      .all() as any[];
+    // proj_stable should NOT be re-enqueued; only proj_new is new
+    const payloads = rows.map((r: any) => JSON.parse(r.payload));
+    const stableRows = payloads.filter((p: any) => p.project_id === "proj_stable");
+    const newRows = payloads.filter((p: any) => p.project_id === "proj_new");
+    expect(stableRows.length).toBe(1);
+    expect(newRows.length).toBe(1);
+  });
+
   test("enqueues to archive_queue with content hash", () => {
     const resolver = new MockResolver({});
     const processor = new Processor(resolver as any, db);
