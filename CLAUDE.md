@@ -12,8 +12,8 @@ Bun-powered TypeScript daemon that syncs Claude Code telemetry from `~/.claude/`
 bun install                          # install dependencies
 bun run start                        # run daemon (incremental sync)
 bun run backfill                     # backfill all history, then daemon
-bun run open                         # facility startup with preflight checks
-bun run close                        # facility close (daemon stays running in dormant mode)
+bun run open                         # facility open (preflight checks, flip active, dashboard)
+bun run close                        # facility close (flip dormant, stop dashboard)
 bun run dashboard                    # verification dashboard (localhost:7777)
 ```
 
@@ -21,20 +21,14 @@ No linter, no tsconfig. Dependencies: `@supabase/supabase-js` + `bun:sqlite` (bu
 
 ## Architecture
 
-Pipeline daemon (`bin/daemon.ts`) with three subsystems:
+Always-on service (`bin/daemon.ts`, launchd-managed) with three subsystems:
 - **OTLP receiver (HTTP)** — Bun server on `127.0.0.1:4318`, accepts OpenTelemetry JSON payloads, writes to SQLite before ack
 - **Process watcher (250ms)** — detects Claude process lifecycle via `ps`/`lsof`, pushes agent state directly to Supabase
 - **Pipeline (5s)** — Receivers collect data → Processor writes to SQLite outbox → Shipper pushes to Supabase
 
-Data flows through a local SQLite outbox (`data/telemetry.db`, WAL mode) for durability. If the daemon crashes or Supabase is down, unshipped rows persist and drain on next startup.
+Data flows through a local SQLite outbox (`data/telemetry.db`, WAL mode) for durability. If the daemon crashes or Supabase is down, unshipped rows persist and drain on restart.
 
-### Dormant Mode
-
-`lo-close` writes a `.dormant` flag file instead of killing the daemon. While dormant:
-- OTLP receiver continues accepting events
-- Pipeline processes data into SQLite outbox
-- Supabase shipping is paused (outbox rows accumulate)
-- `lo-open` removes the flag and shipping resumes, draining the backlog
+The daemon does not know or care about facility status (active/dormant). That's a UI signal for Next.js. `lo-open` and `lo-close` flip `facility_status.status` in Supabase but do not affect the daemon.
 
 ### Module Layout
 
@@ -121,7 +115,7 @@ Several files resolve paths relative to `import.meta.dirname` or `import.meta.ur
 
 ### launchd Integration
 
-`com.lo.telemetry-exporter.plist` runs `bun run bin/daemon.ts` as a macOS user agent. The daemon survives `lo-close` (dormant mode). Logs go to `~/.claude/lo-exporter.{log,err}`.
+`com.lo.telemetry-exporter.plist` runs `bun run bin/daemon.ts` as a macOS user agent. Always running — starts on boot, restarts on crash. One-time setup: `bun run setup`. Logs go to `~/.claude/lo-exporter.{log,err}`.
 
 ## Environment
 

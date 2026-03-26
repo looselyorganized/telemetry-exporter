@@ -1,13 +1,18 @@
 #!/usr/bin/env bun
 /**
- * LO Telemetry Exporter — Thin Orchestrator
+ * LO Telemetry Exporter — Always-On Service
  *
  * Wires pipeline stages (receivers -> processor -> shipper) together.
  * Contains NO business logic — no caches, no aggregation, no project resolution.
  *
- * Two loops:
- *   1. Process Watcher (250ms) — detects Claude lifecycle, pushes direct to Supabase
- *   2. Pipeline (5s) — collect -> process -> ship via SQLite outbox
+ * Three subsystems:
+ *   1. OTLP Receiver (HTTP) — accepts OTel events on 127.0.0.1:4318
+ *   2. Process Watcher (250ms) — detects Claude lifecycle, pushes direct to Supabase
+ *   3. Pipeline (5s) — collect -> process -> ship via SQLite outbox
+ *
+ * The daemon is always on. It does not know or care about facility status
+ * (active/dormant). That's a UI signal for Next.js, not an operational control.
+ * launchd owns the lifecycle — starts on boot, restarts on crash.
  */
 
 import { LOG_FILE, readStatsCache, readModelStats } from "../src/parsers";
@@ -18,7 +23,7 @@ import { ProcessWatcher } from "../src/process/watcher";
 import { ProjectResolver } from "../src/project/resolver";
 import { reportError, clearErrors } from "../src/errors";
 import { flushErrors, pruneResolved, clearErrorsTable } from "../src/db/errors";
-import { PID_FILE, DORMANT_FLAG, isProcessRunning } from "../src/cli-output";
+import { PID_FILE, isProcessRunning } from "../src/cli-output";
 import { initLocal, getLocal, closeLocal, purgeFailed, pruneProcessedOtelEvents, expireStaleOtelEvents, otelEventsReceivedSince, otelActiveSessionCount, otelQueueDepth } from "../src/db/local";
 import { startOtlpServer, stopOtlpServer, pruneRateLimits } from "../src/otel/server";
 import { buildSessionRegistry, refreshRegistry } from "../src/otel/session-registry";
@@ -60,10 +65,6 @@ try {
   writeFileSync(PID_FILE, String(process.pid));
 }
 
-// ─── Dormant mode ──────────────────────────────────────────────────────────
-/** Check if facility is dormant (flag file written by lo-close, removed by lo-open). */
-function isDormant(): boolean { return existsSync(DORMANT_FLAG); }
-
 // ─── Signal handlers ────────────────────────────────────────────────────────
 function shutdown(): void {
   try { stopOtlpServer(); } catch {} // 1. Stop accepting new OTLP connections
@@ -81,8 +82,7 @@ console.log("LO Telemetry Exporter starting...");
 console.log(`  Supabase: ${SUPABASE_URL}`);
 console.log(`  Watcher: 250ms poll (agent state push-on-change)`);
 console.log(`  Aggregator: 5s cycle (tokens, sessions, events)`);
-const dormantAtStart = isDormant();
-console.log(`  Mode: ${IS_BACKFILL ? "BACKFILL + daemon" : "daemon (incremental)"}${dormantAtStart ? " [DORMANT]" : ""}\n`);
+console.log(`  Mode: ${IS_BACKFILL ? "BACKFILL + daemon" : "daemon (incremental)"}\n`);
 
 initSupabase(SUPABASE_URL, SUPABASE_KEY);
 
@@ -177,46 +177,39 @@ if (IS_BACKFILL) {
   console.log("Reading log file...");
   await detectAndFillGap();
 
-  // Compute tokens and push directly to Supabase — bypasses the outbox so
-  // the website has a correct tokens_today before the pipeline loop starts.
-  // Log events are already handled by detectAndFillGap() above.
   const initialTokenMap = tokenReceiver.poll();
   processor.processTokens(initialTokenMap);
   processor.processMetrics(readStatsCache(), readModelStats());
 
-  if (!isDormant()) {
-    const startupMetrics = processor.getStartupMetrics();
-    if (startupMetrics) {
-      const { error } = await getSupabase()
-        .from("facility_status")
-        .update(startupMetrics)
-        .eq("id", 1);
-      if (error) {
-        console.warn(`  Startup sync failed: ${error.message}`);
-      } else {
-        console.log(`  Startup sync: pushed tokens_today=${startupMetrics.tokens_today} directly`);
-      }
+  const startupMetrics = processor.getStartupMetrics();
+  if (startupMetrics) {
+    const { error } = await getSupabase()
+      .from("facility_status")
+      .update(startupMetrics)
+      .eq("id", 1);
+    if (error) {
+      console.warn(`  Startup sync failed: ${error.message}`);
+    } else {
+      console.log(`  Startup sync: pushed tokens_today=${startupMetrics.tokens_today} directly`);
     }
-
-    // Drain any outbox rows from gap detection or startup processing
-    let startupShipped = 0;
-    while (shipper.outboxDepth() > 0) {
-      startupShipped += (await shipper.ship()).shipped;
-      await Bun.sleep(100);
-    }
-    if (startupShipped > 0) console.log(`  Startup drain: shipped ${startupShipped} outbox rows`);
-  } else {
-    console.log("  Dormant: skipping startup sync + drain (data in SQLite outbox)");
   }
+
+  // Drain any outbox rows from gap detection or startup processing
+  let startupShipped = 0;
+  while (shipper.outboxDepth() > 0) {
+    startupShipped += (await shipper.ship()).shipped;
+    await Bun.sleep(100);
+  }
+  if (startupShipped > 0) console.log(`  Startup drain: shipped ${startupShipped} outbox rows`);
 
   console.log("  Ready — will only sync new events from this point.\n");
 }
-console.log("Daemon running (250ms watcher + 5s aggregator). Press Ctrl+C to stop.\n");
+console.log("Daemon running (250ms watcher + 5s pipeline). Press Ctrl+C to stop.\n");
 
-// ─── Auto-close state ───────────────────────────────────────────────────────
-const AUTO_CLOSE_MS = 2 * 60 * 60 * 1000;
+// ─── Auto-dormant state ─────────────────────────────────────────────────────
+const AUTO_DORMANT_MS = 2 * 60 * 60 * 1000;
 let lastActiveAgentTime = Date.now();
-let autoCloseFired = false;
+let autoDormantFired = false;
 
 // ─── Loop 1: Process Watcher (250ms) ────────────────────────────────────────
 const watcher = new ProcessWatcher();
@@ -224,22 +217,21 @@ const watcher = new ProcessWatcher();
 async function watcherLoop(): Promise<never> {
   while (true) {
     try {
-      const dormant = isDormant();
       const diff = watcher.tick();
       if (diff) {
-        if (!dormant) await pushAgentState(diff);
+        await pushAgentState(diff);
         for (const event of diff.events) {
           console.log(`  ${new Date().toLocaleTimeString()} [${event.type}] ${event.project} (pid ${event.pid})`);
         }
       }
       if (watcher.activeAgents > 0) {
         lastActiveAgentTime = Date.now();
-        autoCloseFired = false;
+        autoDormantFired = false;
       }
-      if (!dormant && !autoCloseFired && Date.now() - lastActiveAgentTime > AUTO_CLOSE_MS) {
+      if (!autoDormantFired && Date.now() - lastActiveAgentTime > AUTO_DORMANT_MS) {
         await setFacilitySwitch("dormant");
-        autoCloseFired = true;
-        console.log(`  ${new Date().toLocaleTimeString()} [auto-close] Facility dormant after 2h idle`);
+        autoDormantFired = true;
+        console.log(`  ${new Date().toLocaleTimeString()} [auto-dormant] Facility status → dormant after 2h idle`);
       }
     } catch (err) {
       console.error("Watcher error:", err);
@@ -255,12 +247,8 @@ const time = () => new Date().toLocaleTimeString();
 let cycle = 0;
 
 async function pipelineLoop(): Promise<never> {
-  let lastDormantLog = 0;
-
   while (true) {
     try {
-      const dormant = isDormant();
-
       // Collect (each receiver in its own try/catch)
       let newEntries: import("../src/parsers").LogEntry[] = [];
       try { newEntries = logReceiver.poll(); } catch (e) { reportError("event_write", `logReceiver: ${errMsg(e)}`); }
@@ -271,7 +259,7 @@ async function pipelineLoop(): Promise<never> {
       let metrics: import("../src/pipeline/receivers").MetricsSnapshot = { statsCache: null, modelStats: [] };
       try { metrics = metricsReceiver.poll(); } catch (e) { reportError("metrics_sync", `metricsReceiver: ${errMsg(e)}`); }
 
-      // Process -> SQLite outbox (always, even when dormant)
+      // Process -> SQLite outbox
       if (newEntries.length > 0) processor.processEvents(newEntries);
       processor.processTokens(tokenMap);
       processor.processMetrics(metrics.statsCache, metrics.modelStats);
@@ -287,76 +275,53 @@ async function pipelineLoop(): Promise<never> {
         }
       } catch (e) { reportError("otel_processing", `otelReceiver: ${errMsg(e)}`); }
 
-      if (dormant) {
-        // Log dormant status once per 5 minutes
-        const now = Date.now();
-        if (now - lastDormantLog > 5 * 60 * 1000) {
-          const depth = shipper.outboxDepth();
-          console.log(`  ${time()} — dormant (${depth} outbox rows queued for shipping)`);
-          lastDormantLog = now;
+      // Ship -> Supabase
+      const result = await shipper.ship();
+      if (result.shipped > 0 || result.failed > 0) {
+        console.log(`  ${time()} — shipped ${result.shipped} rows${result.failed > 0 ? `, ${result.failed} failed` : ""}`);
+      }
+
+      // Archive (every 12 cycles / ~60s)
+      if (cycle % 12 === 0 && cycle > 0) await shipper.shipArchive();
+
+      // Periodic maintenance (every 60 cycles / ~5 min)
+      if (cycle % 60 === 0 && cycle > 0) {
+        await processor.refreshResolver();
+        refreshRegistry(resolver);
+        await processor.refreshBaselines();
+        if (new Date().getMinutes() < 1) {
+          processor.snapshotFacilityState({
+            status: watcher.activeAgents > 0 ? "active" : "dormant",
+            activeAgents: watcher.activeAgents,
+            activeProjects: [],
+          });
         }
+        shipper.pruneShipped(7);
+        shipper.pruneShippedArchive(7);
+        pruneProcessedOtelEvents(7);
+        expireStaleOtelEvents(24);
+        pruneRateLimits();
+        await shipper.verify([]);
+        const depth = shipper.outboxDepth();
+        if (depth > 1000) reportError("event_write", `Outbox backlog: ${depth} pending rows`);
+        const aDepth = shipper.archiveDepth();
+        if (aDepth > 500) reportError("event_write", `Archive backlog: ${aDepth} pending rows`);
+        await maybePruneRemoteEvents();
 
-        // Local maintenance only
-        if (cycle % 60 === 0 && cycle > 0) {
-          await processor.refreshResolver();
-          refreshRegistry(resolver);
-          shipper.pruneShipped(7);
-          shipper.pruneShippedArchive(7);
-          pruneProcessedOtelEvents(7);
-          expireStaleOtelEvents(24);
-          pruneRateLimits();
-        }
-      } else {
-        // Ship -> Supabase
-        const result = await shipper.ship();
-        if (result.shipped > 0 || result.failed > 0) {
-          console.log(`  ${time()} — shipped ${result.shipped} rows${result.failed > 0 ? `, ${result.failed} failed` : ""}`);
-        }
-
-        // Archive (every 12 cycles / ~60s)
-        if (cycle % 12 === 0 && cycle > 0) await shipper.shipArchive();
-
-        // Periodic maintenance (every 60 cycles / ~5 min)
-        if (cycle % 60 === 0 && cycle > 0) {
-          await processor.refreshResolver();
-          refreshRegistry(resolver);
-          await processor.refreshBaselines();
-          if (new Date().getMinutes() < 1) {
-            processor.snapshotFacilityState({
-              status: watcher.activeAgents > 0 ? "active" : "dormant",
-              activeAgents: watcher.activeAgents,
-              activeProjects: [],
-            });
-          }
-          shipper.pruneShipped(7);
-          shipper.pruneShippedArchive(7);
-          pruneProcessedOtelEvents(7);
-          expireStaleOtelEvents(24);
-          pruneRateLimits();
-          await shipper.verify([]);
-          const depth = shipper.outboxDepth();
-          if (depth > 1000) reportError("event_write", `Outbox backlog: ${depth} pending rows`);
-          const aDepth = shipper.archiveDepth();
-          if (aDepth > 500) reportError("event_write", `Archive backlog: ${aDepth} pending rows`);
-          await maybePruneRemoteEvents();
-
-          // OTel health monitoring
-          const otelRate = otelEventsReceivedSince(60);
-          const otelSessions = otelActiveSessionCount(300);
-          const otelDepth = otelQueueDepth();
-          console.log(`  ${time()} — OTel: ${otelRate} events/min, ${otelSessions} sessions, ${otelDepth} queued`);
-          if (watcher.activeAgents > 0 && otelRate === 0) {
-            console.warn(`  ${time()} — Active agents detected but no OTel events — check CLAUDE_CODE_ENABLE_TELEMETRY`);
-          }
+        // OTel health monitoring
+        const otelRate = otelEventsReceivedSince(60);
+        const otelSessions = otelActiveSessionCount(300);
+        const otelDepth = otelQueueDepth();
+        console.log(`  ${time()} — OTel: ${otelRate} events/min, ${otelSessions} sessions, ${otelDepth} queued`);
+        if (watcher.activeAgents > 0 && otelRate === 0) {
+          console.warn(`  ${time()} — Active agents detected but no OTel events — check CLAUDE_CODE_ENABLE_TELEMETRY`);
         }
       }
       cycle++;
     } catch (err) {
       reportError("event_write", `pipelineLoop: ${errMsg(err)}`);
     } finally {
-      if (!isDormant()) {
-        try { await flushErrors(); await pruneResolved(); } catch {}
-      }
+      try { await flushErrors(); await pruneResolved(); } catch {}
     }
     await Bun.sleep(5000);
   }

@@ -75,11 +75,6 @@ flowchart TD
             GA & GB & GC -->|read| CT
         end
 
-        subgraph Dormant["Dormant Mode"]
-            DF[".dormant flag file"]
-            DF -->|"exists → skip shipping"| SHIP
-            DF -->|"exists → skip pushAgentState"| AS
-        end
     end
 
     subgraph Supabase["Supabase (warm/cold tier)"]
@@ -169,29 +164,11 @@ flowchart LR
     A4 --> B4 --> C4 --> D4
 ```
 
-## Dormant Mode State Machine
+## Facility Status (UI Signal Only)
 
-```mermaid
-stateDiagram-v2
-    [*] --> Active: lo-open (remove .dormant)
+The daemon is always on. `facility_status.status` in Supabase is a UI signal for Next.js:
+- `lo-open` sets it to `active` (green dot on platform)
+- `lo-close` sets it to `dormant` (grey dot on platform)
+- Auto-dormant after 2h with no active Claude agents
 
-    Active --> Active: pipeline cycle (collect + process + ship)
-    Active --> Dormant: lo-close (write .dormant)
-    Active --> Dormant: auto-close (2h idle)
-
-    Dormant --> Dormant: pipeline cycle (collect + process, skip ship)
-    Dormant --> Active: lo-open (remove .dormant, drain outbox)
-
-    note right of Active
-        OTLP receiver: accepting
-        Pipeline: processing + shipping
-        Watcher: pushing agent state
-    end note
-
-    note right of Dormant
-        OTLP receiver: accepting
-        Pipeline: processing only
-        Watcher: detecting (no push)
-        Outbox: accumulating
-    end note
-```
+The daemon does not read or care about this field. It always processes and ships.

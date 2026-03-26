@@ -1,12 +1,12 @@
 #!/usr/bin/env bun
 /**
- * LO Facility Startup Command
+ * LO Facility Open Command
  *
- * Preflight checks, exporter health verification, OTel env check, status flip.
- * Only sets facility to "open" when the entire telemetry pipeline is verified healthy.
+ * Preflight checks, service health verification, OTel env check, status flip.
+ * Only sets facility to "active" when all services are verified healthy.
  *
- * The daemon should already be running (launchd-managed, survives lo-close).
- * If not running, starts it as a safety net.
+ * The exporter daemon should already be running (launchd-managed).
+ * This command does NOT start or manage the daemon — it only verifies it.
  *
  * Usage:
  *   bun run bin/lo-open.ts
@@ -15,10 +15,10 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { readFileSync, existsSync, writeFileSync, unlinkSync } from "fs";
 import { join } from "path";
+import { $ } from "bun";
 import {
   EXPORTER_DIR,
   PID_FILE,
-  DORMANT_FLAG,
   DASHBOARD_PID_FILE,
   DIM,
   RESET,
@@ -186,58 +186,22 @@ function checkOtelEnv(): void {
   }
 }
 
-async function checkExporter(): Promise<number> {
-  // Check PID file for a running process
+function checkExporter(): number {
   if (existsSync(PID_FILE)) {
     const pid = parseInt(readFileSync(PID_FILE, "utf-8").trim(), 10);
     if (!isNaN(pid) && isProcessRunning(pid)) {
       pass("Exporter", `Running (PID ${pid})`);
       return pid;
     }
-    // Stale PID file — clean it up
+    // Stale PID file
     try { unlinkSync(PID_FILE); } catch {}
   }
 
-  // Not running — start it as a safety net
-  warn("Exporter", "Not running — starting daemon");
-  const daemonScript = join(EXPORTER_DIR, "bin", "daemon.ts");
-  try {
-    const proc = Bun.spawn(["bun", "run", daemonScript], {
-      cwd: EXPORTER_DIR,
-      stdio: ["ignore", "ignore", "ignore"],
-      env: { ...process.env },
-    });
-
-    if (proc.pid) {
-      proc.unref();
-
-      // Wait briefly for daemon to write PID file
-      const MAX_WAIT = 5_000;
-      const POLL_INTERVAL = 500;
-      let waited = 0;
-
-      while (waited < MAX_WAIT) {
-        await Bun.sleep(POLL_INTERVAL);
-        waited += POLL_INTERVAL;
-
-        if (existsSync(PID_FILE)) {
-          const pid = parseInt(readFileSync(PID_FILE, "utf-8").trim(), 10);
-          if (!isNaN(pid) && isProcessRunning(pid)) {
-            pass("Exporter", `Started (PID ${pid}, after ${waited}ms)`);
-            return pid;
-          }
-        }
-      }
-    }
-  } catch (err: any) {
-    // Fall through to abort
-  }
-
-  fail("Exporter", "Could not start daemon");
+  fail("Exporter", "Not running");
   printErrLogTail();
   abort(
-    "Exporter did not start. Check error log above.",
-    `Log: ${ERR_LOG}`
+    "Exporter daemon is not running.",
+    "Run: bun run setup (loads launchd plist) or manually: bun run start"
   );
 }
 
@@ -377,8 +341,6 @@ async function flipFacilityOpen(supabase: SupabaseClient): Promise<void> {
 
 // ─── Main ───────────────────────────────────────────────────────────────────
 
-import { $ } from "bun";
-
 async function main(): Promise<void> {
   printOpenBanner();
 
@@ -390,20 +352,14 @@ async function main(): Promise<void> {
   await checkSite();
   checkOtelEnv();
 
-  // Remove dormant flag before checking exporter (so daemon resumes shipping)
-  if (existsSync(DORMANT_FLAG)) {
-    try { unlinkSync(DORMANT_FLAG); } catch {}
-    pass("Exporter", "Dormant flag removed (shipping resumed)");
-  }
-
-  const pid = await checkExporter();
+  const pid = checkExporter();
   await checkTelemetry(supabase);
   await flipFacilityOpen(supabase);
   await launchDashboard();
 
   console.log();
   console.log(`  ${DIM}── Facility Open ──────────────────────${RESET}`);
-  console.log(`  ${BOLD}Exporter:${RESET} PID ${pid} (processing + shipping)`);
+  console.log(`  ${BOLD}Exporter:${RESET} PID ${pid}`);
   console.log();
 }
 
