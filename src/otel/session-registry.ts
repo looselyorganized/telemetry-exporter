@@ -15,7 +15,7 @@ import { homedir } from "os";
 import { join, basename } from "path";
 import { isDirectory } from "../utils";
 import { resolveProjIdForDir } from "../project/scanner";
-import { upsertSession, getSession } from "../db/local";
+import { upsertSession, getSession, enqueueArchive } from "../db/local";
 import type { SessionRow } from "../db/local";
 import type { ProjectResolver } from "../project/resolver";
 
@@ -83,8 +83,8 @@ export function buildSessionRegistry(
       const sessionId = basename(entry, ".jsonl");
       if (!isUuid(sessionId)) continue;
 
-      // Also check for subagent sessions under <session-uuid>/subagents/
       upsertSession(sessionId, projId, cwd);
+      archiveSessionMapping(sessionId, projId, cwd);
       registered++;
     }
 
@@ -98,6 +98,7 @@ export function buildSessionRegistry(
           const subSessionId = basename(sf, ".jsonl");
           if (!isUuid(subSessionId)) continue;
           upsertSession(subSessionId, projId, cwd);
+          archiveSessionMapping(subSessionId, projId, cwd);
           registered++;
         }
       } catch {
@@ -118,6 +119,7 @@ export function lookupSession(sessionId: string): SessionRow | null {
 
 /**
  * Register a single session→project mapping. Immutable (first write wins).
+ * Also archives to Supabase via archive queue.
  */
 export function registerSession(
   sessionId: string,
@@ -125,6 +127,13 @@ export function registerSession(
   cwd: string
 ): void {
   upsertSession(sessionId, projId, cwd);
+  archiveSessionMapping(sessionId, projId, cwd);
+}
+
+/** Archive a session mapping to Supabase via the archive queue. */
+function archiveSessionMapping(sessionId: string, projId: string, cwd: string): void {
+  const payload = JSON.stringify({ session_id: sessionId, proj_id: projId, cwd });
+  enqueueArchive("session_mapping", payload, sessionId);
 }
 
 /**

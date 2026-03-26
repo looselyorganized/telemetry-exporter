@@ -32,6 +32,9 @@ export class Processor {
   private lastTelemetryPayloads: Map<string, string> = new Map();
   /** Track (projId, date) pairs that have OTel data — prevents JSONL format ping-pong. */
   private otelCoveredPairs: Set<string> = new Set();
+  /** Track fired budget alerts per (projId, date, threshold) to prevent re-firing. */
+  private firedAlerts: Set<string> = new Set();
+  private static BUDGET_THRESHOLDS = [5, 10, 25];
 
   constructor(resolver: ProjectResolver, db: Database) {
     this.resolver = resolver;
@@ -449,6 +452,29 @@ export class Processor {
           event_text: `${tool.toolName} (${tool.success ? "success" : "failure"}, ${tool.durationMs}ms)`,
           timestamp: tool.timestamp,
         });
+      }
+
+      // 3. Budget threshold alerts
+      for (const projId of affectedProjects) {
+        const costRows = getCostByProject(projId);
+        let todayCost = 0;
+        for (const row of costRows) {
+          if (row.date === today) todayCost += row.cost_usd;
+        }
+
+        for (const threshold of Processor.BUDGET_THRESHOLDS) {
+          const alertKey = `${projId}\0${today}\0${threshold}`;
+          if (todayCost >= threshold && !this.firedAlerts.has(alertKey)) {
+            enqueue("alerts", {
+              project_id: projId,
+              alert_type: "budget_threshold",
+              threshold_usd: threshold,
+              current_usd: Math.round(todayCost * 100) / 100,
+              date: today,
+            });
+            this.firedAlerts.add(alertKey);
+          }
+        }
       }
     })();
   }

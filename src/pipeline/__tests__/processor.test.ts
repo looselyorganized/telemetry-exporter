@@ -1547,4 +1547,104 @@ describe("Processor.processOtelBatch", () => {
     const totalDailyCount = (db.query("SELECT COUNT(*) as c FROM outbox WHERE target = 'daily_metrics'").get() as any).c;
     expect(totalDailyCount).toBe(otelDailyCount);
   });
+
+  test("fires budget alert when daily cost exceeds threshold", () => {
+    const resolver = new MockResolver({});
+    const processor = new Processor(resolver as any, db);
+    const today = todayStr();
+
+    // Send enough cost to exceed $5 threshold
+    processor.processOtelBatch({
+      apiRequests: [{
+        projId: "proj_expensive", sessionId: "s1", model: "opus",
+        inputTokens: 100000, outputTokens: 50000, cacheReadTokens: 0, cacheWriteTokens: 0,
+        costUsd: 6.0, durationMs: 100, timestamp: `${today}T12:00:00.000Z`,
+      }],
+      toolResults: [],
+      unresolved: 0,
+    });
+
+    const alertRows = db
+      .query("SELECT * FROM outbox WHERE target = 'alerts'")
+      .all() as any[];
+    expect(alertRows.length).toBeGreaterThanOrEqual(1);
+
+    const payload = JSON.parse(alertRows[0].payload);
+    expect(payload.project_id).toBe("proj_expensive");
+    expect(payload.alert_type).toBe("budget_threshold");
+    expect(payload.threshold_usd).toBe(5);
+    expect(payload.current_usd).toBe(6.0);
+  });
+
+  test("fires multiple alerts for multiple thresholds", () => {
+    const resolver = new MockResolver({});
+    const processor = new Processor(resolver as any, db);
+    const today = todayStr();
+
+    processor.processOtelBatch({
+      apiRequests: [{
+        projId: "proj_big", sessionId: "s1", model: "opus",
+        inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0,
+        costUsd: 26.0, durationMs: 100, timestamp: `${today}T12:00:00.000Z`,
+      }],
+      toolResults: [],
+      unresolved: 0,
+    });
+
+    const alertRows = db
+      .query("SELECT * FROM outbox WHERE target = 'alerts'")
+      .all() as any[];
+    // Should fire $5, $10, $25 = 3 alerts
+    expect(alertRows).toHaveLength(3);
+
+    const thresholds = alertRows.map((r: any) => JSON.parse(r.payload).threshold_usd).sort((a: number, b: number) => a - b);
+    expect(thresholds).toEqual([5, 10, 25]);
+  });
+
+  test("does not re-fire same threshold on subsequent batches", () => {
+    const resolver = new MockResolver({});
+    const processor = new Processor(resolver as any, db);
+    const today = todayStr();
+
+    const batch = {
+      apiRequests: [{
+        projId: "proj_repeat", sessionId: "s1", model: "opus",
+        inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0,
+        costUsd: 6.0, durationMs: 100, timestamp: `${today}T12:00:00.000Z`,
+      }],
+      toolResults: [] as any[],
+      unresolved: 0,
+    };
+
+    processor.processOtelBatch(batch);
+    const countFirst = (db.query("SELECT COUNT(*) as c FROM outbox WHERE target = 'alerts'").get() as any).c;
+    expect(countFirst).toBe(1); // $5 threshold
+
+    processor.processOtelBatch(batch);
+    const countSecond = (db.query("SELECT COUNT(*) as c FROM outbox WHERE target = 'alerts'").get() as any).c;
+
+    // $10 threshold now crossed (6+6=12), so one more alert fires
+    expect(countSecond).toBe(2); // $5 (first) + $10 (second)
+  });
+
+  test("does not fire alert below threshold", () => {
+    const resolver = new MockResolver({});
+    const processor = new Processor(resolver as any, db);
+    const today = todayStr();
+
+    processor.processOtelBatch({
+      apiRequests: [{
+        projId: "proj_cheap", sessionId: "s1", model: "opus",
+        inputTokens: 100, outputTokens: 50, cacheReadTokens: 0, cacheWriteTokens: 0,
+        costUsd: 0.01, durationMs: 100, timestamp: `${today}T12:00:00.000Z`,
+      }],
+      toolResults: [],
+      unresolved: 0,
+    });
+
+    const alertRows = db
+      .query("SELECT * FROM outbox WHERE target = 'alerts'")
+      .all();
+    expect(alertRows).toHaveLength(0);
+  });
 });

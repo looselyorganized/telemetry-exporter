@@ -11,7 +11,7 @@
 
 import { parseOtlpLogs, parseOtlpMetrics, parseOtlpTraces, classifyEvent } from "./parser";
 import type { OtelLogEvent, OtelMetricEvent, OtelSpanEvent } from "./parser";
-import { insertOtelEvent } from "../db/local";
+import { insertOtelEvent, getCostByProject, getCostToday } from "../db/local";
 import { reportError } from "../errors";
 
 // ─── Constants ──────────────────────────────────────────────────────────────
@@ -141,13 +141,38 @@ export function startOtlpServer(options: OtlpServerOptions = {}): void {
 async function handleRequest(req: Request): Promise<Response> {
   const url = new URL(req.url);
   const path = url.pathname;
+  const json = (data: unknown, status = 200) =>
+    new Response(JSON.stringify(data), { status, headers: { "Content-Type": "application/json" } });
 
-  // Only accept POST for OTLP endpoints
+  // ─── GET: Cost API ────────────────────────────────────────────────────────
+  if (req.method === "GET") {
+    try {
+      if (path === "/cost/today") {
+        return json(getCostToday());
+      }
+
+      const costMatch = path.match(/^\/cost\/(.+)$/);
+      if (costMatch) {
+        return json(getCostByProject(costMatch[1]));
+      }
+
+      const budgetMatch = path.match(/^\/budget\/(.+)$/);
+      if (budgetMatch) {
+        return json({ project: budgetMatch[1], costs: getCostByProject(budgetMatch[1]), thresholds: null });
+      }
+
+      return new Response(null, { status: 404 });
+    } catch (err) {
+      reportError("otel_cost", `Cost API error: ${err instanceof Error ? err.message : String(err)}`);
+      return json({ error: "Internal error" }, 500);
+    }
+  }
+
+  // ─── POST: OTLP ingestion ─────────────────────────────────────────────────
   if (req.method !== "POST") {
     return new Response(null, { status: 405 });
   }
 
-  // Route to handler
   let handler: ((body: unknown) => { stored: number; rateLimited: number }) | null = null;
   if (path === "/v1/logs") handler = handleLogs;
   else if (path === "/v1/metrics") handler = handleMetrics;
@@ -157,41 +182,24 @@ async function handleRequest(req: Request): Promise<Response> {
     return new Response(null, { status: 404 });
   }
 
-  // Parse JSON body
   let body: unknown;
   try {
     body = await req.json();
   } catch {
-    return new Response(JSON.stringify({ error: "Invalid JSON" }), {
-      status: 400,
-      headers: { "Content-Type": "application/json" },
-    });
+    return json({ error: "Invalid JSON" }, 400);
   }
 
-  // Process and store
   try {
     const result = handler(body);
 
     if (result.rateLimited > 0 && result.stored === 0) {
-      return new Response(JSON.stringify({ error: "Rate limited" }), {
-        status: 429,
-        headers: { "Content-Type": "application/json" },
-      });
+      return json({ error: "Rate limited" }, 429);
     }
 
-    return new Response(JSON.stringify({
-      stored: result.stored,
-      rateLimited: result.rateLimited,
-    }), {
-      status: 200,
-      headers: { "Content-Type": "application/json" },
-    });
+    return json({ stored: result.stored, rateLimited: result.rateLimited });
   } catch (err) {
     reportError("otel_ingestion", `OTLP handler error: ${err instanceof Error ? err.message : String(err)}`);
-    return new Response(JSON.stringify({ error: "Storage failure" }), {
-      status: 503,
-      headers: { "Content-Type": "application/json" },
-    });
+    return json({ error: "Storage failure" }, 503);
   }
 }
 

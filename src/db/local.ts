@@ -466,6 +466,39 @@ export function getUnprocessedOtelEvents(limit: number): OtelEventRow[] {
     .all(limit);
 }
 
+/** Count OTel events received in the last N seconds. */
+export function otelEventsReceivedSince(seconds: number): number {
+  const db = getLocal();
+  const row = db
+    .query<{ count: number }, [number]>(
+      "SELECT COUNT(*) AS count FROM otel_events WHERE received_at > datetime('now', ? || ' seconds')"
+    )
+    .get(-seconds)!;
+  return row.count;
+}
+
+/** Count distinct session_ids in recent OTel events. */
+export function otelActiveSessionCount(seconds: number): number {
+  const db = getLocal();
+  const row = db
+    .query<{ count: number }, [number]>(
+      "SELECT COUNT(DISTINCT session_id) AS count FROM otel_events WHERE session_id IS NOT NULL AND received_at > datetime('now', ? || ' seconds')"
+    )
+    .get(-seconds)!;
+  return row.count;
+}
+
+/** Count unprocessed OTel events (queue depth). */
+export function otelQueueDepth(): number {
+  const db = getLocal();
+  const row = db
+    .query<{ count: number }, []>(
+      "SELECT COUNT(*) AS count FROM otel_events WHERE processed = 0"
+    )
+    .get()!;
+  return row.count;
+}
+
 export function markOtelEventsProcessed(ids: number[]): void {
   if (ids.length === 0) return;
   const db = getLocal();
@@ -506,6 +539,15 @@ export function upsertSession(
   db.query(
     "INSERT OR IGNORE INTO sessions (session_id, proj_id, cwd, first_seen) VALUES (?, ?, ?, ?)"
   ).run(sessionId, projId, cwd, now);
+}
+
+/** Count total registered sessions. */
+export function sessionCount(): number {
+  const db = getLocal();
+  const row = db
+    .query<{ count: number }, []>("SELECT COUNT(*) AS count FROM sessions")
+    .get()!;
+  return row.count;
 }
 
 export function getSession(sessionId: string): SessionRow | null {

@@ -71,6 +71,15 @@ export const SHIPPING_STRATEGIES: Record<string, ShippingStrategy> = {
     fallbackToPerRow: false,
     priority: 5,
   },
+  alerts: {
+    table: "alerts",
+    method: "upsert",
+    onConflict: "project_id,alert_type,date",
+    ignoreDuplicates: false,
+    batchSize: 10,
+    fallbackToPerRow: true,
+    priority: 0, // highest priority
+  },
 };
 
 // ---------------------------------------------------------------------------

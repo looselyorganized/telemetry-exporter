@@ -219,9 +219,9 @@ describe("POST /v1/traces", () => {
 // ─── Error handling ─────────────────────────────────────────────────────────
 
 describe("error handling", () => {
-  test("returns 405 for GET", async () => {
+  test("returns 404 for GET on OTLP paths", async () => {
     const res = await fetch(`${BASE_URL}/v1/logs`);
-    expect(res.status).toBe(405);
+    expect(res.status).toBe(404);
   });
 
   test("returns 404 for unknown path", async () => {

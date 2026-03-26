@@ -9,7 +9,7 @@
 
 import { statSync } from "fs";
 import { Database } from "bun:sqlite";
-import { initLocal, getLocal, getCursor, setCursor } from "../db/local";
+import { initLocal, getLocal, getCursor, setCursor, otelActiveSessionCount, sessionCount } from "../db/local";
 import { LogTailer } from "../parsers";
 import { readStatsCache, readModelStats } from "../parsers";
 import type { LogEntry, StatsCache, ModelStats } from "../parsers";
@@ -89,14 +89,37 @@ export class LogReceiver {
 // ---------------------------------------------------------------------------
 
 export class TokenReceiver {
+  private lastFallbackLog = 0;
+
   constructor(private resolver: ProjectResolver) {}
 
+  /**
+   * Poll JSONL token data. Gated by OTel coverage — only runs if
+   * OTel covers < 50% of registered sessions (fallback mode).
+   * Returns empty map when OTel has sufficient coverage.
+   */
   poll(): ProjectTokenMap {
+    const totalSessions = sessionCount();
+    const otelSessions = otelActiveSessionCount(300); // last 5 minutes
+
+    // If we have sessions registered and OTel covers >= 50%, skip JSONL
+    if (totalSessions > 0 && otelSessions >= totalSessions * 0.5) {
+      return new Map();
+    }
+
+    // Fallback: JSONL scanning active
+    const now = Date.now();
+    if (totalSessions > 0 && now - this.lastFallbackLog > 60_000) {
+      console.log(`  JSONL fallback: ${otelSessions}/${totalSessions} sessions have OTel data`);
+      this.lastFallbackLog = now;
+    }
+
     return scanProjectTokens(this.resolver);
   }
 
   readAll(): ProjectTokenMap {
-    return this.poll();
+    // Always scan all for backfill — skip coverage check
+    return scanProjectTokens(this.resolver);
   }
 }
 

@@ -19,7 +19,7 @@ import { ProjectResolver } from "../src/project/resolver";
 import { reportError, clearErrors } from "../src/errors";
 import { flushErrors, pruneResolved, clearErrorsTable } from "../src/db/errors";
 import { PID_FILE, DORMANT_FLAG, isProcessRunning } from "../src/cli-output";
-import { initLocal, getLocal, closeLocal, purgeFailed, pruneProcessedOtelEvents } from "../src/db/local";
+import { initLocal, getLocal, closeLocal, purgeFailed, pruneProcessedOtelEvents, otelEventsReceivedSince, otelActiveSessionCount, otelQueueDepth } from "../src/db/local";
 import { startOtlpServer, stopOtlpServer, pruneRateLimits } from "../src/otel/server";
 import { buildSessionRegistry, refreshRegistry } from "../src/otel/session-registry";
 import { OtelReceiver } from "../src/pipeline/otel-receiver";
@@ -337,6 +337,15 @@ async function pipelineLoop(): Promise<never> {
           const aDepth = shipper.archiveDepth();
           if (aDepth > 500) reportError("event_write", `Archive backlog: ${aDepth} pending rows`);
           await maybePruneRemoteEvents();
+
+          // OTel health monitoring
+          const otelRate = otelEventsReceivedSince(60);
+          const otelSessions = otelActiveSessionCount(300);
+          const otelDepth = otelQueueDepth();
+          console.log(`  ${time()} — OTel: ${otelRate} events/min, ${otelSessions} sessions, ${otelDepth} queued`);
+          if (watcher.activeAgents > 0 && otelRate === 0) {
+            console.warn(`  ${time()} — Active agents detected but no OTel events — check CLAUDE_CODE_ENABLE_TELEMETRY`);
+          }
         }
       }
       cycle++;
