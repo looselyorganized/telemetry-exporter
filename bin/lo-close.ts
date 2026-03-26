@@ -2,19 +2,19 @@
 /**
  * LO Facility Close Command
  *
- * Graceful shutdown: flips status to dormant, stops the exporter,
- * unloads the launchd service.
+ * Flips facility status to dormant and stops the dashboard.
+ * The exporter daemon keeps running in dormant mode — it continues
+ * processing data into SQLite but skips Supabase shipping.
  *
  * Usage:
  *   bun run bin/lo-close.ts
  */
 
 import { createClient } from "@supabase/supabase-js";
-import { existsSync, readFileSync, unlinkSync } from "fs";
-import { $ } from "bun";
+import { existsSync, readFileSync, unlinkSync, writeFileSync } from "fs";
 import {
-  PLIST_DEST,
   PID_FILE,
+  DORMANT_FLAG,
   DASHBOARD_PID_FILE,
   DIM,
   RESET,
@@ -38,7 +38,7 @@ async function main(): Promise<void> {
     auth: { persistSession: false, autoRefreshToken: false },
   });
 
-  // 1. Flip status to dormant
+  // 1. Flip status to dormant in Supabase
   const { error } = await supabase
     .from("facility_status")
     .update({ status: "dormant", updated_at: new Date().toISOString() })
@@ -51,69 +51,31 @@ async function main(): Promise<void> {
 
   pass("Facility", "Status → dormant");
 
-  // 2. Stop exporter process (SIGTERM for graceful shutdown)
-  await stopExporter();
+  // 2. Write dormant flag so daemon knows to skip Supabase shipping
+  writeFileSync(DORMANT_FLAG, new Date().toISOString());
+  pass("Exporter", "Dormant flag written (daemon continues processing locally)");
 
-  // Clean up stale PID file
+  // Verify daemon is still running
   if (existsSync(PID_FILE)) {
-    try {
-      unlinkSync(PID_FILE);
-    } catch {}
+    const pid = parseInt(readFileSync(PID_FILE, "utf-8").trim(), 10);
+    if (!isNaN(pid) && isProcessRunning(pid)) {
+      pass("Exporter", `Still running (PID ${pid})`);
+    } else {
+      warn("Exporter", "Not running (will restart on next lo-open)");
+    }
+  } else {
+    warn("Exporter", "No PID file (will start on next lo-open)");
   }
 
   // 3. Stop dashboard
   await stopDashboard();
 
-  // 4. Unload launchd service (prevents auto-restart)
-  await unloadLaunchd();
-
   // Summary
   console.log();
   console.log(`  ${DIM}── Facility Closed ────────────────────${RESET}`);
-  console.log(`  ${BOLD}Exporter:${RESET} stopped`);
+  console.log(`  ${BOLD}Exporter:${RESET} running (dormant — local processing only)`);
   console.log(`  ${BOLD}Dashboard:${RESET} stopped`);
-  console.log(`  ${BOLD}Launchd:${RESET} unloaded (lo-open will reload)`);
   console.log();
-}
-
-async function stopExporter(): Promise<void> {
-  let pid: number | null = null;
-
-  if (existsSync(PID_FILE)) {
-    const parsed = parseInt(readFileSync(PID_FILE, "utf-8").trim(), 10);
-    if (!isNaN(parsed) && isProcessRunning(parsed)) {
-      pid = parsed;
-    }
-  }
-
-  if (!pid) {
-    pass("Exporter", "Already stopped");
-    return;
-  }
-
-  process.kill(pid, "SIGTERM");
-
-  // Wait for exit (up to 5s)
-  const MAX_WAIT = 5_000;
-  const POLL_INTERVAL = 250;
-  let waited = 0;
-
-  while (waited < MAX_WAIT && isProcessRunning(pid)) {
-    await Bun.sleep(POLL_INTERVAL);
-    waited += POLL_INTERVAL;
-  }
-
-  if (isProcessRunning(pid)) {
-    warn("Exporter", `PID ${pid} did not exit after ${MAX_WAIT / 1000}s, sending SIGKILL`);
-    process.kill(pid, "SIGKILL");
-    await Bun.sleep(500);
-  }
-
-  if (!isProcessRunning(pid)) {
-    pass("Exporter", `Stopped (PID ${pid})`);
-  } else {
-    fail("Exporter", `PID ${pid} could not be killed`);
-  }
 }
 
 async function stopDashboard(): Promise<void> {
@@ -143,22 +105,6 @@ async function stopDashboard(): Promise<void> {
     pass("Dashboard", `Stopped (PID ${pid})`);
   } else {
     fail("Dashboard", `PID ${pid} could not be killed`);
-  }
-}
-
-async function unloadLaunchd(): Promise<void> {
-  try {
-    const result = await $`launchctl list`.quiet();
-    const isLoaded = result.stdout.toString().includes("com.lo.telemetry-exporter");
-
-    if (isLoaded) {
-      await $`launchctl unload ${PLIST_DEST}`.quiet();
-      pass("Launchd", "Service unloaded");
-    } else {
-      pass("Launchd", "Service already unloaded");
-    }
-  } catch {
-    warn("Launchd", "Could not check/unload service");
   }
 }
 

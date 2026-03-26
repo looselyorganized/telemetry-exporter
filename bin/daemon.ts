@@ -18,8 +18,9 @@ import { ProcessWatcher } from "../src/process/watcher";
 import { ProjectResolver } from "../src/project/resolver";
 import { reportError, clearErrors } from "../src/errors";
 import { flushErrors, pruneResolved, clearErrorsTable } from "../src/db/errors";
-import { PID_FILE, isProcessRunning } from "../src/cli-output";
-import { initLocal, getLocal, closeLocal, purgeFailed } from "../src/db/local";
+import { PID_FILE, DORMANT_FLAG, isProcessRunning } from "../src/cli-output";
+import { initLocal, getLocal, closeLocal, purgeFailed, pruneProcessedOtelEvents } from "../src/db/local";
+import { startOtlpServer, stopOtlpServer, pruneRateLimits } from "../src/otel/server";
 import { LogReceiver, TokenReceiver, MetricsReceiver } from "../src/pipeline/receivers";
 import { Processor } from "../src/pipeline/processor";
 import { Shipper } from "../src/pipeline/shipper";
@@ -57,10 +58,15 @@ try {
   writeFileSync(PID_FILE, String(process.pid));
 }
 
+// ─── Dormant mode ──────────────────────────────────────────────────────────
+/** Check if facility is dormant (flag file written by lo-close, removed by lo-open). */
+function isDormant(): boolean { return existsSync(DORMANT_FLAG); }
+
 // ─── Signal handlers ────────────────────────────────────────────────────────
 function shutdown(): void {
+  try { stopOtlpServer(); } catch {} // 1. Stop accepting new OTLP connections
   try { void flushErrors(); } catch {}
-  try { closeLocal(); } catch {}
+  try { closeLocal(); } catch {}     // 2. Close SQLite after OTLP server is stopped
   removePidFile();
   process.exit(0);
 }
@@ -73,7 +79,8 @@ console.log("LO Telemetry Exporter starting...");
 console.log(`  Supabase: ${SUPABASE_URL}`);
 console.log(`  Watcher: 250ms poll (agent state push-on-change)`);
 console.log(`  Aggregator: 5s cycle (tokens, sessions, events)`);
-console.log(`  Mode: ${IS_BACKFILL ? "BACKFILL + daemon" : "daemon (incremental)"}\n`);
+const dormantAtStart = isDormant();
+console.log(`  Mode: ${IS_BACKFILL ? "BACKFILL + daemon" : "daemon (incremental)"}${dormantAtStart ? " [DORMANT]" : ""}\n`);
 
 initSupabase(SUPABASE_URL, SUPABASE_KEY);
 
@@ -88,6 +95,14 @@ if (purged > 0) console.log(`  Purged ${purged} permanently failed outbox rows`)
 
 clearErrors();
 await clearErrorsTable();
+
+// ─── OTLP receiver ─────────────────────────────────────────────────────────
+try {
+  startOtlpServer();
+} catch (err) {
+  console.warn(`  OTLP server failed to start: ${err instanceof Error ? err.message : err}`);
+  console.warn("  OTel events will not be received. Check if port 4318 is in use.");
+}
 
 // ─── Build pipeline ─────────────────────────────────────────────────────────
 const resolver = new ProjectResolver();
@@ -163,26 +178,30 @@ if (IS_BACKFILL) {
   processor.processTokens(initialTokenMap);
   processor.processMetrics(readStatsCache(), readModelStats());
 
-  const startupMetrics = processor.getStartupMetrics();
-  if (startupMetrics) {
-    const { error } = await getSupabase()
-      .from("facility_status")
-      .update(startupMetrics)
-      .eq("id", 1);
-    if (error) {
-      console.warn(`  Startup sync failed: ${error.message}`);
-    } else {
-      console.log(`  Startup sync: pushed tokens_today=${startupMetrics.tokens_today} directly`);
+  if (!isDormant()) {
+    const startupMetrics = processor.getStartupMetrics();
+    if (startupMetrics) {
+      const { error } = await getSupabase()
+        .from("facility_status")
+        .update(startupMetrics)
+        .eq("id", 1);
+      if (error) {
+        console.warn(`  Startup sync failed: ${error.message}`);
+      } else {
+        console.log(`  Startup sync: pushed tokens_today=${startupMetrics.tokens_today} directly`);
+      }
     }
-  }
 
-  // Drain any outbox rows from gap detection or startup processing
-  let startupShipped = 0;
-  while (shipper.outboxDepth() > 0) {
-    startupShipped += (await shipper.ship()).shipped;
-    await Bun.sleep(100);
+    // Drain any outbox rows from gap detection or startup processing
+    let startupShipped = 0;
+    while (shipper.outboxDepth() > 0) {
+      startupShipped += (await shipper.ship()).shipped;
+      await Bun.sleep(100);
+    }
+    if (startupShipped > 0) console.log(`  Startup drain: shipped ${startupShipped} outbox rows`);
+  } else {
+    console.log("  Dormant: skipping startup sync + drain (data in SQLite outbox)");
   }
-  if (startupShipped > 0) console.log(`  Startup drain: shipped ${startupShipped} outbox rows`);
 
   console.log("  Ready — will only sync new events from this point.\n");
 }
@@ -199,9 +218,10 @@ const watcher = new ProcessWatcher();
 async function watcherLoop(): Promise<never> {
   while (true) {
     try {
+      const dormant = isDormant();
       const diff = watcher.tick();
       if (diff) {
-        await pushAgentState(diff);
+        if (!dormant) await pushAgentState(diff);
         for (const event of diff.events) {
           console.log(`  ${new Date().toLocaleTimeString()} [${event.type}] ${event.project} (pid ${event.pid})`);
         }
@@ -210,7 +230,7 @@ async function watcherLoop(): Promise<never> {
         lastActiveAgentTime = Date.now();
         autoCloseFired = false;
       }
-      if (!autoCloseFired && Date.now() - lastActiveAgentTime > AUTO_CLOSE_MS) {
+      if (!dormant && !autoCloseFired && Date.now() - lastActiveAgentTime > AUTO_CLOSE_MS) {
         await setFacilitySwitch("dormant");
         autoCloseFired = true;
         console.log(`  ${new Date().toLocaleTimeString()} [auto-close] Facility dormant after 2h idle`);
@@ -229,8 +249,12 @@ const time = () => new Date().toLocaleTimeString();
 let cycle = 0;
 
 async function pipelineLoop(): Promise<never> {
+  let lastDormantLog = 0;
+
   while (true) {
     try {
+      const dormant = isDormant();
+
       // Collect (each receiver in its own try/catch)
       let newEntries: import("../src/parsers").LogEntry[] = [];
       try { newEntries = logReceiver.poll(); } catch (e) { reportError("event_write", `logReceiver: ${errMsg(e)}`); }
@@ -241,45 +265,68 @@ async function pipelineLoop(): Promise<never> {
       let metrics: import("../src/pipeline/receivers").MetricsSnapshot = { statsCache: null, modelStats: [] };
       try { metrics = metricsReceiver.poll(); } catch (e) { reportError("metrics_sync", `metricsReceiver: ${errMsg(e)}`); }
 
-      // Process -> SQLite outbox
+      // Process -> SQLite outbox (always, even when dormant)
       if (newEntries.length > 0) processor.processEvents(newEntries);
       processor.processTokens(tokenMap);
       processor.processMetrics(metrics.statsCache, metrics.modelStats);
 
-      // Ship -> Supabase
-      const result = await shipper.ship();
-      if (result.shipped > 0 || result.failed > 0) {
-        console.log(`  ${time()} — shipped ${result.shipped} rows${result.failed > 0 ? `, ${result.failed} failed` : ""}`);
-      }
-
-      // Archive (every 12 cycles / ~60s)
-      if (cycle % 12 === 0 && cycle > 0) await shipper.shipArchive();
-
-      // Periodic maintenance (every 60 cycles / ~5 min)
-      if (cycle % 60 === 0 && cycle > 0) {
-        await processor.refreshResolver();
-        await processor.refreshBaselines();
-        if (new Date().getMinutes() < 1) {
-          processor.snapshotFacilityState({
-            status: watcher.activeAgents > 0 ? "active" : "dormant",
-            activeAgents: watcher.activeAgents,
-            activeProjects: [],
-          });
+      if (dormant) {
+        // Log dormant status once per 5 minutes
+        const now = Date.now();
+        if (now - lastDormantLog > 5 * 60 * 1000) {
+          const depth = shipper.outboxDepth();
+          console.log(`  ${time()} — dormant (${depth} outbox rows queued for shipping)`);
+          lastDormantLog = now;
         }
-        shipper.pruneShipped(7);
-        shipper.pruneShippedArchive(7);
-        await shipper.verify([]);
-        const depth = shipper.outboxDepth();
-        if (depth > 1000) reportError("event_write", `Outbox backlog: ${depth} pending rows`);
-        const aDepth = shipper.archiveDepth();
-        if (aDepth > 500) reportError("event_write", `Archive backlog: ${aDepth} pending rows`);
-        await maybePruneRemoteEvents();
+
+        // Local maintenance only
+        if (cycle % 60 === 0 && cycle > 0) {
+          await processor.refreshResolver();
+          shipper.pruneShipped(7);
+          shipper.pruneShippedArchive(7);
+          pruneProcessedOtelEvents(7);
+          pruneRateLimits();
+        }
+      } else {
+        // Ship -> Supabase
+        const result = await shipper.ship();
+        if (result.shipped > 0 || result.failed > 0) {
+          console.log(`  ${time()} — shipped ${result.shipped} rows${result.failed > 0 ? `, ${result.failed} failed` : ""}`);
+        }
+
+        // Archive (every 12 cycles / ~60s)
+        if (cycle % 12 === 0 && cycle > 0) await shipper.shipArchive();
+
+        // Periodic maintenance (every 60 cycles / ~5 min)
+        if (cycle % 60 === 0 && cycle > 0) {
+          await processor.refreshResolver();
+          await processor.refreshBaselines();
+          if (new Date().getMinutes() < 1) {
+            processor.snapshotFacilityState({
+              status: watcher.activeAgents > 0 ? "active" : "dormant",
+              activeAgents: watcher.activeAgents,
+              activeProjects: [],
+            });
+          }
+          shipper.pruneShipped(7);
+          shipper.pruneShippedArchive(7);
+          pruneProcessedOtelEvents(7);
+          pruneRateLimits();
+          await shipper.verify([]);
+          const depth = shipper.outboxDepth();
+          if (depth > 1000) reportError("event_write", `Outbox backlog: ${depth} pending rows`);
+          const aDepth = shipper.archiveDepth();
+          if (aDepth > 500) reportError("event_write", `Archive backlog: ${aDepth} pending rows`);
+          await maybePruneRemoteEvents();
+        }
       }
       cycle++;
     } catch (err) {
       reportError("event_write", `pipelineLoop: ${errMsg(err)}`);
     } finally {
-      try { await flushErrors(); await pruneResolved(); } catch {}
+      if (!isDormant()) {
+        try { await flushErrors(); await pruneResolved(); } catch {}
+      }
     }
     await Bun.sleep(5000);
   }

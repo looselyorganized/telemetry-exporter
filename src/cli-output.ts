@@ -13,6 +13,7 @@ import { join } from "path";
 export const EXPORTER_DIR = join(import.meta.dirname!, "..");
 export const ENV_FILE = join(EXPORTER_DIR, ".env");
 export const PID_FILE = join(EXPORTER_DIR, ".exporter.pid");
+export const DORMANT_FLAG = join(EXPORTER_DIR, ".dormant");
 export const DASHBOARD_PID_FILE = join(EXPORTER_DIR, ".dashboard.pid");
 export const PLIST_NAME = "com.lo.telemetry-exporter.plist";
 export const PLIST_SOURCE = join(EXPORTER_DIR, PLIST_NAME);

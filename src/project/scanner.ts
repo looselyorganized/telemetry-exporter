@@ -26,7 +26,7 @@ const ENCODED_ROOTS = [PROJECT_ROOT, LEGACY_ROOT].map((r) => r.replace(/\//g, "-
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
-/** id -> date -> { model: totalTokens } */
+/** id -> date -> { model: tokenCount } */
 export type ProjectTokenMap = Map<string, Map<string, Record<string, number>>>;
 
 interface JsonlFile {

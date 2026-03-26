@@ -42,6 +42,37 @@ CREATE INDEX IF NOT EXISTS idx_outbox_shipped ON outbox(shipped_at) WHERE shippe
 CREATE INDEX IF NOT EXISTS idx_outbox_target ON outbox(target, status);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_archive_content ON archive_queue(fact_type, content_hash);
 CREATE INDEX IF NOT EXISTS idx_archive_unshipped ON archive_queue(shipped_at) WHERE shipped_at IS NULL;
+
+CREATE TABLE IF NOT EXISTS otel_events (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  event_type  TEXT NOT NULL,
+  session_id  TEXT,
+  payload     TEXT NOT NULL,
+  processed   INTEGER DEFAULT 0,
+  received_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_otel_unprocessed
+  ON otel_events(processed) WHERE processed = 0;
+
+CREATE TABLE IF NOT EXISTS sessions (
+  session_id  TEXT PRIMARY KEY,
+  proj_id     TEXT NOT NULL,
+  cwd         TEXT NOT NULL,
+  first_seen  TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS cost_tracking (
+  proj_id             TEXT NOT NULL,
+  date                TEXT NOT NULL,
+  model               TEXT NOT NULL,
+  input_tokens        INTEGER DEFAULT 0,
+  output_tokens       INTEGER DEFAULT 0,
+  cache_read_tokens   INTEGER DEFAULT 0,
+  cache_write_tokens  INTEGER DEFAULT 0,
+  cost_usd            REAL DEFAULT 0,
+  request_count       INTEGER DEFAULT 0,
+  PRIMARY KEY (proj_id, date, model)
+);
 `;
 
 export function initLocal(dbPath: string): void {
@@ -396,4 +427,153 @@ export function archiveDepth(): number {
     )
     .get()!;
   return row.count;
+}
+
+// ---------------------------------------------------------------------------
+// OTel events CRUD
+// ---------------------------------------------------------------------------
+
+export interface OtelEventRow {
+  id: number;
+  event_type: string;
+  session_id: string | null;
+  payload: string;
+  processed: number;
+  received_at: string;
+}
+
+export function insertOtelEvent(
+  eventType: string,
+  sessionId: string | null,
+  payload: string
+): number {
+  const db = getLocal();
+  const now = new Date().toISOString();
+  const result = db
+    .query(
+      "INSERT INTO otel_events (event_type, session_id, payload, received_at) VALUES (?, ?, ?, ?) RETURNING id"
+    )
+    .get(eventType, sessionId, payload, now) as { id: number };
+  return result.id;
+}
+
+export function getUnprocessedOtelEvents(limit: number): OtelEventRow[] {
+  const db = getLocal();
+  return db
+    .query<OtelEventRow, [number]>(
+      "SELECT * FROM otel_events WHERE processed = 0 ORDER BY id LIMIT ?"
+    )
+    .all(limit);
+}
+
+export function markOtelEventsProcessed(ids: number[]): void {
+  if (ids.length === 0) return;
+  const db = getLocal();
+  const placeholders = ids.map(() => "?").join(", ");
+  db.query(`UPDATE otel_events SET processed = 1 WHERE id IN (${placeholders})`).run(...ids);
+}
+
+export function pruneProcessedOtelEvents(olderThanDays: number): number {
+  const db = getLocal();
+  const result = db
+    .query<never, [number]>(
+      `DELETE FROM otel_events
+       WHERE processed = 1
+         AND received_at < datetime('now', ? || ' days')`
+    )
+    .run(-olderThanDays);
+  return result.changes;
+}
+
+// ---------------------------------------------------------------------------
+// Sessions CRUD
+// ---------------------------------------------------------------------------
+
+export interface SessionRow {
+  session_id: string;
+  proj_id: string;
+  cwd: string;
+  first_seen: string;
+}
+
+export function upsertSession(
+  sessionId: string,
+  projId: string,
+  cwd: string
+): void {
+  const db = getLocal();
+  const now = new Date().toISOString();
+  db.query(
+    "INSERT OR IGNORE INTO sessions (session_id, proj_id, cwd, first_seen) VALUES (?, ?, ?, ?)"
+  ).run(sessionId, projId, cwd, now);
+}
+
+export function getSession(sessionId: string): SessionRow | null {
+  const db = getLocal();
+  return (
+    db
+      .query<SessionRow, [string]>("SELECT * FROM sessions WHERE session_id = ?")
+      .get(sessionId) ?? null
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Cost tracking CRUD
+// ---------------------------------------------------------------------------
+
+export interface CostTrackingRow {
+  proj_id: string;
+  date: string;
+  model: string;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  cost_usd: number;
+  request_count: number;
+}
+
+export function upsertCostTracking(
+  projId: string,
+  date: string,
+  model: string,
+  tokens: {
+    input: number;
+    output: number;
+    cache_read: number;
+    cache_write: number;
+  },
+  costUsd: number
+): void {
+  const db = getLocal();
+  db.query(
+    `INSERT INTO cost_tracking (proj_id, date, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd, request_count)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
+     ON CONFLICT (proj_id, date, model) DO UPDATE SET
+       input_tokens = input_tokens + excluded.input_tokens,
+       output_tokens = output_tokens + excluded.output_tokens,
+       cache_read_tokens = cache_read_tokens + excluded.cache_read_tokens,
+       cache_write_tokens = cache_write_tokens + excluded.cache_write_tokens,
+       cost_usd = cost_usd + excluded.cost_usd,
+       request_count = request_count + 1`
+  ).run(projId, date, model, tokens.input, tokens.output, tokens.cache_read, tokens.cache_write, costUsd);
+}
+
+export function getCostByProject(projId: string): CostTrackingRow[] {
+  const db = getLocal();
+  return db
+    .query<CostTrackingRow, [string]>(
+      "SELECT * FROM cost_tracking WHERE proj_id = ? ORDER BY date DESC, model"
+    )
+    .all(projId);
+}
+
+export function getCostToday(): CostTrackingRow[] {
+  const db = getLocal();
+  const today = new Date().toISOString().split("T")[0];
+  return db
+    .query<CostTrackingRow, [string]>(
+      "SELECT * FROM cost_tracking WHERE date = ? ORDER BY proj_id, model"
+    )
+    .all(today);
 }
