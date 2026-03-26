@@ -80,6 +80,14 @@ export const SHIPPING_STRATEGIES: Record<string, ShippingStrategy> = {
     fallbackToPerRow: true,
     priority: 0, // highest priority
   },
+  otel_api_requests: {
+    table: "otel_api_requests",
+    method: "insert",
+    ignoreDuplicates: true,
+    batchSize: 100,
+    fallbackToPerRow: true,
+    priority: 2, // same priority as events
+  },
 };
 
 // ---------------------------------------------------------------------------

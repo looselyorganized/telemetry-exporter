@@ -320,6 +320,20 @@ export class Processor {
       for (const req of batch.apiRequests) {
         const date = req.timestamp.substring(0, 10);
 
+        // Ship raw per-request event to Supabase (proj_id already resolved)
+        enqueue("otel_api_requests", {
+          project_id: req.projId,
+          session_id: req.sessionId,
+          model: req.model,
+          input_tokens: req.inputTokens,
+          output_tokens: req.outputTokens,
+          cache_read_tokens: req.cacheReadTokens,
+          cache_write_tokens: req.cacheWriteTokens,
+          cost_usd: req.costUsd,
+          duration_ms: req.durationMs,
+          timestamp: req.timestamp,
+        });
+
         // Upsert cost_tracking (per-request granularity)
         upsertCostTracking(req.projId, date, req.model, {
           input: req.inputTokens,
