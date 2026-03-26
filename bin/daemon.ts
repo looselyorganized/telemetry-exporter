@@ -21,6 +21,8 @@ import { flushErrors, pruneResolved, clearErrorsTable } from "../src/db/errors";
 import { PID_FILE, DORMANT_FLAG, isProcessRunning } from "../src/cli-output";
 import { initLocal, getLocal, closeLocal, purgeFailed, pruneProcessedOtelEvents } from "../src/db/local";
 import { startOtlpServer, stopOtlpServer, pruneRateLimits } from "../src/otel/server";
+import { buildSessionRegistry, refreshRegistry } from "../src/otel/session-registry";
+import { OtelReceiver } from "../src/pipeline/otel-receiver";
 import { LogReceiver, TokenReceiver, MetricsReceiver } from "../src/pipeline/receivers";
 import { Processor } from "../src/pipeline/processor";
 import { Shipper } from "../src/pipeline/shipper";
@@ -110,9 +112,13 @@ await resolver.refresh();
 const rStats = resolver.stats();
 console.log(`  Project maps: ${rStats.total} projects mapped (lo.yml: ${rStats.fromLoYml}, cache: ${rStats.fromNameCache})`);
 
+const sessionCount = buildSessionRegistry(resolver);
+console.log(`  Session registry: ${sessionCount} sessions mapped from ~/.claude/projects/`);
+
 const logReceiver = new LogReceiver(LOG_FILE, DB_PATH);
 const tokenReceiver = new TokenReceiver(resolver);
 const metricsReceiver = new MetricsReceiver();
+const otelReceiver = new OtelReceiver();
 const processor = new Processor(resolver, getLocal());
 const shipper = new Shipper(getLocal(), getSupabase());
 await processor.hydrate();
@@ -270,6 +276,17 @@ async function pipelineLoop(): Promise<never> {
       processor.processTokens(tokenMap);
       processor.processMetrics(metrics.statsCache, metrics.modelStats);
 
+      // OTel pipeline: poll unprocessed events, process into outbox
+      try {
+        const otelBatch = otelReceiver.poll();
+        if (otelBatch.apiRequests.length > 0 || otelBatch.toolResults.length > 0) {
+          processor.processOtelBatch(otelBatch);
+        }
+        if (otelBatch.unresolved > 0 && cycle % 12 === 0) {
+          console.log(`  ${time()} — ${otelBatch.unresolved} OTel events awaiting session resolution`);
+        }
+      } catch (e) { reportError("otel_processing", `otelReceiver: ${errMsg(e)}`); }
+
       if (dormant) {
         // Log dormant status once per 5 minutes
         const now = Date.now();
@@ -282,6 +299,7 @@ async function pipelineLoop(): Promise<never> {
         // Local maintenance only
         if (cycle % 60 === 0 && cycle > 0) {
           await processor.refreshResolver();
+          refreshRegistry(resolver);
           shipper.pruneShipped(7);
           shipper.pruneShippedArchive(7);
           pruneProcessedOtelEvents(7);
@@ -300,6 +318,7 @@ async function pipelineLoop(): Promise<never> {
         // Periodic maintenance (every 60 cycles / ~5 min)
         if (cycle % 60 === 0 && cycle > 0) {
           await processor.refreshResolver();
+          refreshRegistry(resolver);
           await processor.refreshBaselines();
           if (new Date().getMinutes() < 1) {
             processor.snapshotFacilityState({

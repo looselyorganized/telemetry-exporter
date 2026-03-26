@@ -3,7 +3,8 @@ import type { ProjectResolver } from "../project/resolver";
 import type { LogEntry, ModelStats, StatsCache } from "../parsers";
 import type { ProjectTokenMap } from "../project/scanner";
 import { computeTokensByProject } from "../project/scanner";
-import { enqueue, enqueueArchive, addKnownProject, getKnownProjectIds } from "../db/local";
+import { enqueue, enqueueArchive, addKnownProject, getKnownProjectIds, upsertCostTracking, getCostByProject } from "../db/local";
+import type { OtelEventBatch, ApiRequestEvent } from "./otel-receiver";
 import { getSupabase } from "../db/client";
 import { sumValues, formatModelStats, type LifetimeCounters } from "../../bin/daemon-helpers";
 
@@ -29,6 +30,8 @@ export class Processor {
   private todayTokensTotal: number = 0;
   private lastDailyPayloads: Map<string, string> = new Map();
   private lastTelemetryPayloads: Map<string, string> = new Map();
+  /** Track (projId, date) pairs that have OTel data — prevents JSONL format ping-pong. */
+  private otelCoveredPairs: Set<string> = new Set();
 
   constructor(resolver: ProjectResolver, db: Database) {
     this.resolver = resolver;
@@ -199,6 +202,9 @@ export class Processor {
           // Date guard: only sync past dates on the first run of the day
           if (date !== today && !isNewDailySync) continue;
 
+          // Skip JSONL writes for pairs that have OTel data (prevents format ping-pong)
+          if (this.otelCoveredPairs.has(`${projId}\0${date}`)) continue;
+
           const evCounts = eventCounts.get(projId)?.get(date);
           const payload = {
             date,
@@ -281,6 +287,169 @@ export class Processor {
       this.lifetimeBaseline = new Map(Object.entries(lifetimeCounters));
       this.lastDailySync = today;
       this.lastProjectSync = today;
+    })();
+  }
+
+  /**
+   * Process a batch of OTel events: update cost_tracking, enqueue daily_metrics
+   * with per-type token breakdown, and enqueue tool_result events.
+   */
+  processOtelBatch(batch: OtelEventBatch): void {
+    if (batch.apiRequests.length === 0 && batch.toolResults.length === 0) return;
+
+    const today = new Date().toISOString().substring(0, 10);
+
+    this.db.transaction(() => {
+      // 1. Process api_request events → cost_tracking + daily_metrics
+      // Aggregate by (projId, date, model) within this batch
+      const aggregated = new Map<string, {
+        projId: string;
+        date: string;
+        model: string;
+        input: number;
+        output: number;
+        cacheRead: number;
+        cacheWrite: number;
+        cost: number;
+        count: number;
+      }>();
+
+      for (const req of batch.apiRequests) {
+        const date = req.timestamp.substring(0, 10);
+
+        // Upsert cost_tracking (per-request granularity)
+        upsertCostTracking(req.projId, date, req.model, {
+          input: req.inputTokens,
+          output: req.outputTokens,
+          cache_read: req.cacheReadTokens,
+          cache_write: req.cacheWriteTokens,
+        }, req.costUsd);
+
+        // Mark this pair as OTel-covered (prevents JSONL format ping-pong)
+        this.otelCoveredPairs.add(`${req.projId}\0${date}`);
+
+        // Aggregate for daily_metrics enqueue
+        const key = `${req.projId}\0${date}\0${req.model}`;
+        let agg = aggregated.get(key);
+        if (!agg) {
+          agg = { projId: req.projId, date, model: req.model, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, count: 0 };
+          aggregated.set(key, agg);
+        }
+        agg.input += req.inputTokens;
+        agg.output += req.outputTokens;
+        agg.cacheRead += req.cacheReadTokens;
+        agg.cacheWrite += req.cacheWriteTokens;
+        agg.cost += req.costUsd;
+        agg.count++;
+      }
+
+      // Build daily_metrics payloads grouped by (projId, date)
+      const dailyGroups = new Map<string, {
+        projId: string;
+        date: string;
+        models: Record<string, { input: number; cache_read: number; cache_write: number; output: number }>;
+      }>();
+
+      for (const agg of aggregated.values()) {
+        const groupKey = `${agg.projId}\0${agg.date}`;
+        let group = dailyGroups.get(groupKey);
+        if (!group) {
+          group = { projId: agg.projId, date: agg.date, models: {} };
+          dailyGroups.set(groupKey, group);
+        }
+
+        // Read current totals from cost_tracking for this (proj, date, model)
+        // to get the full accumulated state (not just this batch)
+        const costRows = getCostByProject(agg.projId).filter(r => r.date === agg.date && r.model === agg.model);
+        if (costRows.length > 0) {
+          const row = costRows[0];
+          group.models[agg.model] = {
+            input: row.input_tokens,
+            cache_read: row.cache_read_tokens,
+            cache_write: row.cache_write_tokens,
+            output: row.output_tokens,
+          };
+        } else {
+          group.models[agg.model] = {
+            input: agg.input,
+            cache_read: agg.cacheRead,
+            cache_write: agg.cacheWrite,
+            output: agg.output,
+          };
+        }
+      }
+
+      // Enqueue daily_metrics with new JSONB format
+      for (const group of dailyGroups.values()) {
+        const payload = {
+          date: group.date,
+          project_id: group.projId,
+          tokens: group.models,
+        };
+
+        // Per-payload dedup
+        const dailyJson = JSON.stringify(payload);
+        const dailyKey = `${group.projId}\0${group.date}`;
+        if (this.lastDailyPayloads.get(dailyKey) === dailyJson) continue;
+        this.lastDailyPayloads.set(dailyKey, dailyJson);
+
+        enqueue("daily_metrics", payload);
+      }
+
+      // Enqueue project_telemetry with accumulated cost_tracking totals
+      const affectedProjects = new Set<string>();
+      for (const req of batch.apiRequests) {
+        affectedProjects.add(req.projId);
+      }
+
+      for (const projId of affectedProjects) {
+        const costRows = getCostByProject(projId);
+        let tokensLifetime = 0;
+        let costLifetime = 0;
+        const todayModels: Record<string, { input: number; cache_read: number; cache_write: number; output: number }> = {};
+        let todayTotal = 0;
+
+        for (const row of costRows) {
+          const rowTotal = row.input_tokens + row.output_tokens + row.cache_read_tokens + row.cache_write_tokens;
+          tokensLifetime += rowTotal;
+          costLifetime += row.cost_usd;
+
+          if (row.date === today) {
+            todayModels[row.model] = {
+              input: row.input_tokens,
+              cache_read: row.cache_read_tokens,
+              cache_write: row.cache_write_tokens,
+              output: row.output_tokens,
+            };
+            todayTotal += rowTotal;
+          }
+        }
+
+        const telemetryPayload = {
+          project_id: projId,
+          tokens_lifetime: tokensLifetime,
+          tokens_today: todayTotal,
+          models_today: todayModels,
+          cost_lifetime: costLifetime,
+        };
+
+        // Per-payload dedup
+        const telemetryJson = JSON.stringify(telemetryPayload);
+        if (this.lastTelemetryPayloads.get(projId) === telemetryJson) continue;
+        this.lastTelemetryPayloads.set(projId, telemetryJson);
+
+        enqueue("project_telemetry", telemetryPayload);
+      }
+
+      // 2. Process tool_result events → events target
+      for (const tool of batch.toolResults) {
+        enqueue("events", {
+          project_id: tool.projId,
+          event_type: "tool",
+          event_text: `${tool.toolName} (${tool.success ? "success" : "failure"}, ${tool.durationMs}ms)`,
+          timestamp: tool.timestamp,
+        });
+      }
     })();
   }
 
