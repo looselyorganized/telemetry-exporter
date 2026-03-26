@@ -53,6 +53,8 @@ CREATE TABLE IF NOT EXISTS otel_events (
 );
 CREATE INDEX IF NOT EXISTS idx_otel_unprocessed
   ON otel_events(processed) WHERE processed = 0;
+CREATE INDEX IF NOT EXISTS idx_otel_session_received
+  ON otel_events(session_id, received_at) WHERE session_id IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS sessions (
   session_id  TEXT PRIMARY KEY,
@@ -515,6 +517,23 @@ export function pruneProcessedOtelEvents(olderThanDays: number): number {
          AND received_at < datetime('now', ? || ' days')`
     )
     .run(-olderThanDays);
+  return result.changes;
+}
+
+/**
+ * Mark unresolved OTel events as processed if older than threshold.
+ * Prevents indefinite accumulation of events from sessions that will
+ * never be resolved (e.g., Claude instances outside the org root).
+ */
+export function expireStaleOtelEvents(olderThanHours: number): number {
+  const db = getLocal();
+  const result = db
+    .query<never, [number]>(
+      `UPDATE otel_events SET processed = 1
+       WHERE processed = 0
+         AND received_at < datetime('now', ? || ' hours')`
+    )
+    .run(-olderThanHours);
   return result.changes;
 }
 

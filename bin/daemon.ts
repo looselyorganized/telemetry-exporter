@@ -19,7 +19,7 @@ import { ProjectResolver } from "../src/project/resolver";
 import { reportError, clearErrors } from "../src/errors";
 import { flushErrors, pruneResolved, clearErrorsTable } from "../src/db/errors";
 import { PID_FILE, DORMANT_FLAG, isProcessRunning } from "../src/cli-output";
-import { initLocal, getLocal, closeLocal, purgeFailed, pruneProcessedOtelEvents, otelEventsReceivedSince, otelActiveSessionCount, otelQueueDepth } from "../src/db/local";
+import { initLocal, getLocal, closeLocal, purgeFailed, pruneProcessedOtelEvents, expireStaleOtelEvents, otelEventsReceivedSince, otelActiveSessionCount, otelQueueDepth } from "../src/db/local";
 import { startOtlpServer, stopOtlpServer, pruneRateLimits } from "../src/otel/server";
 import { buildSessionRegistry, refreshRegistry } from "../src/otel/session-registry";
 import { OtelReceiver } from "../src/pipeline/otel-receiver";
@@ -303,6 +303,7 @@ async function pipelineLoop(): Promise<never> {
           shipper.pruneShipped(7);
           shipper.pruneShippedArchive(7);
           pruneProcessedOtelEvents(7);
+          expireStaleOtelEvents(24);
           pruneRateLimits();
         }
       } else {
@@ -330,6 +331,7 @@ async function pipelineLoop(): Promise<never> {
           shipper.pruneShipped(7);
           shipper.pruneShippedArchive(7);
           pruneProcessedOtelEvents(7);
+          expireStaleOtelEvents(24);
           pruneRateLimits();
           await shipper.verify([]);
           const depth = shipper.outboxDepth();

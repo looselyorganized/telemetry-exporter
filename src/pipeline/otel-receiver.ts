@@ -113,10 +113,16 @@ export class OtelReceiver {
       const timestamp = getStr(attrs, "event.timestamp") || row.received_at;
 
       if (row.event_type === "api_request") {
+        const model = getStr(attrs, "model");
+        if (!model) {
+          // Skip events without a model — would corrupt cost_tracking PK
+          resolvedIds.push(row.id);
+          continue;
+        }
         apiRequests.push({
           projId: session.proj_id,
           sessionId: row.session_id,
-          model: getStr(attrs, "model"),
+          model,
           inputTokens: getNum(attrs, "input_tokens"),
           outputTokens: getNum(attrs, "output_tokens"),
           cacheReadTokens: getNum(attrs, "cache_read_tokens"),

@@ -9,7 +9,7 @@
 
 import { statSync } from "fs";
 import { Database } from "bun:sqlite";
-import { initLocal, getLocal, getCursor, setCursor, otelActiveSessionCount, sessionCount } from "../db/local";
+import { initLocal, getLocal, getCursor, setCursor, otelEventsReceivedSince } from "../db/local";
 import { LogTailer } from "../parsers";
 import { readStatsCache, readModelStats } from "../parsers";
 import type { LogEntry, StatsCache, ModelStats } from "../parsers";
@@ -94,23 +94,21 @@ export class TokenReceiver {
   constructor(private resolver: ProjectResolver) {}
 
   /**
-   * Poll JSONL token data. Gated by OTel coverage — only runs if
-   * OTel covers < 50% of registered sessions (fallback mode).
-   * Returns empty map when OTel has sufficient coverage.
+   * Poll JSONL token data. Gated by OTel activity — only runs if
+   * no OTel events have been received in the last 5 minutes.
+   * Returns empty map when OTel data is flowing.
    */
   poll(): ProjectTokenMap {
-    const totalSessions = sessionCount();
-    const otelSessions = otelActiveSessionCount(300); // last 5 minutes
+    const recentOtelEvents = otelEventsReceivedSince(300);
 
-    // If we have sessions registered and OTel covers >= 50%, skip JSONL
-    if (totalSessions > 0 && otelSessions >= totalSessions * 0.5) {
+    if (recentOtelEvents > 0) {
       return new Map();
     }
 
-    // Fallback: JSONL scanning active
+    // Fallback: no OTel events received recently, JSONL scanning active
     const now = Date.now();
-    if (totalSessions > 0 && now - this.lastFallbackLog > 60_000) {
-      console.log(`  JSONL fallback: ${otelSessions}/${totalSessions} sessions have OTel data`);
+    if (now - this.lastFallbackLog > 60_000) {
+      console.log("  JSONL fallback: no OTel events in last 5 minutes");
       this.lastFallbackLog = now;
     }
 

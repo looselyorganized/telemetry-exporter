@@ -14,7 +14,8 @@ import { readdirSync } from "fs";
 import { homedir } from "os";
 import { join, basename } from "path";
 import { isDirectory } from "../utils";
-import { resolveProjIdForDir } from "../project/scanner";
+import { resolveProjIdForDir, resolveProjectName } from "../project/scanner";
+import { PROJECT_ROOT } from "../project/slug-resolver";
 import { upsertSession, getSession, enqueueArchive } from "../db/local";
 import type { SessionRow } from "../db/local";
 import type { ProjectResolver } from "../project/resolver";
@@ -29,14 +30,18 @@ function isUuid(s: string): boolean {
   return UUID_RE.test(s);
 }
 
-// ─── Decode encoded directory name to a path ────────────────────────────────
+// ─── CWD resolution ─────────────────────────────────────────────────────────
 
 /**
- * Decode a ~/.claude/projects/ encoded directory name back to a filesystem path.
- * The encoding replaces `/` with `-`, so `-Users-bigviking-...` → `/Users/bigviking/...`
+ * Resolve an encoded ~/.claude/projects/ directory name to a CWD path.
+ * Uses resolveProjectName to find the actual project directory name,
+ * then constructs the full path under PROJECT_ROOT.
+ * Falls back to the encoded name if resolution fails.
  */
-function decodeEncodedDir(encodedName: string): string {
-  return "/" + encodedName.replace(/-/g, "/");
+function resolveEncodedDirToCwd(encodedName: string): string {
+  const projectName = resolveProjectName(encodedName);
+  if (projectName) return join(PROJECT_ROOT, projectName);
+  return encodedName; // fallback: store encoded name as-is
 }
 
 // ─── Registry operations ────────────────────────────────────────────────────
@@ -68,7 +73,7 @@ export function buildSessionRegistry(
     const projId = resolveProjIdForDir(encodedDir, resolver);
     if (!projId) continue;
 
-    const cwd = decodeEncodedDir(encodedDir);
+    const cwd = resolveEncodedDirToCwd(encodedDir);
 
     // List .jsonl files — filename (minus extension) is the session UUID
     let entries: string[];
