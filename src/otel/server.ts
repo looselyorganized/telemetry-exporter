@@ -38,6 +38,13 @@ function checkRateLimit(sessionId: string | null): boolean {
   if (!window || now - window.windowStart > RATE_LIMIT_WINDOW_MS) {
     window = { count: 0, windowStart: now };
     rateLimits.set(key, window);
+
+    // Inline prune: remove expired entries from other sessions
+    if (rateLimits.size > 50) {
+      for (const [k, w] of rateLimits) {
+        if (now - w.windowStart > RATE_LIMIT_WINDOW_MS) rateLimits.delete(k);
+      }
+    }
   }
 
   window.count++;
@@ -109,6 +116,8 @@ function handleTraces(body: unknown): { stored: number; rateLimited: number } {
 }
 
 // ─── Server ─────────────────────────────────────────────────────────────────
+// Module-level singleton. Tests must use unique ports and run beforeAll/afterAll
+// lifecycle to avoid cross-file conflicts (Bun runs test files sequentially by default).
 
 let server: ReturnType<typeof Bun.serve> | null = null;
 

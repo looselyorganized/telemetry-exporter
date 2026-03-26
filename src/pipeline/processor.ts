@@ -346,6 +346,17 @@ export class Processor {
         agg.count++;
       }
 
+      // Query cost_tracking once per affected project — reused for daily_metrics and project_telemetry
+      const affectedProjects = new Set<string>();
+      for (const req of batch.apiRequests) {
+        affectedProjects.add(req.projId);
+      }
+
+      const costByProject = new Map<string, import("../db/local").CostTrackingRow[]>();
+      for (const projId of affectedProjects) {
+        costByProject.set(projId, getCostByProject(projId));
+      }
+
       // Build daily_metrics payloads grouped by (projId, date)
       const dailyGroups = new Map<string, {
         projId: string;
@@ -361,16 +372,14 @@ export class Processor {
           dailyGroups.set(groupKey, group);
         }
 
-        // Read current totals from cost_tracking for this (proj, date, model)
-        // to get the full accumulated state (not just this batch)
-        const costRows = getCostByProject(agg.projId).filter(r => r.date === agg.date && r.model === agg.model);
-        if (costRows.length > 0) {
-          const row = costRows[0];
+        // Read current totals from cost_tracking (cached query)
+        const costRow = costByProject.get(agg.projId)?.find(r => r.date === agg.date && r.model === agg.model);
+        if (costRow) {
           group.models[agg.model] = {
-            input: row.input_tokens,
-            cache_read: row.cache_read_tokens,
-            cache_write: row.cache_write_tokens,
-            output: row.output_tokens,
+            input: costRow.input_tokens,
+            cache_read: costRow.cache_read_tokens,
+            cache_write: costRow.cache_write_tokens,
+            output: costRow.output_tokens,
           };
         } else {
           group.models[agg.model] = {
@@ -399,14 +408,9 @@ export class Processor {
         enqueue("daily_metrics", payload);
       }
 
-      // Enqueue project_telemetry with accumulated cost_tracking totals
-      const affectedProjects = new Set<string>();
-      for (const req of batch.apiRequests) {
-        affectedProjects.add(req.projId);
-      }
-
+      // Enqueue project_telemetry with accumulated cost_tracking totals (reusing cached query)
       for (const projId of affectedProjects) {
-        const costRows = getCostByProject(projId);
+        const costRows = costByProject.get(projId) ?? [];
         let tokensLifetime = 0;
         let costLifetime = 0;
         const todayModels: Record<string, { input: number; cache_read: number; cache_write: number; output: number }> = {};
@@ -456,7 +460,7 @@ export class Processor {
 
       // 3. Budget threshold alerts
       for (const projId of affectedProjects) {
-        const costRows = getCostByProject(projId);
+        const costRows = costByProject.get(projId) ?? [];
         let todayCost = 0;
         for (const row of costRows) {
           if (row.date === today) todayCost += row.cost_usd;

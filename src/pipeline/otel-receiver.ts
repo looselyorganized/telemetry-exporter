@@ -110,6 +110,9 @@ export class OtelReceiver {
       }
 
       const attrs = flattenAttributes(payload?.attributes);
+      // Prefer OTel's event.timestamp; fall back to OTLP ingestion time (received_at)
+      // for events that lack it. For unresolved-then-resolved events, received_at
+      // reflects when the OTLP receiver got the event, not when it was processed.
       const timestamp = getStr(attrs, "event.timestamp") || row.received_at;
 
       if (row.event_type === "api_request") {
@@ -127,7 +130,7 @@ export class OtelReceiver {
           outputTokens: getNum(attrs, "output_tokens"),
           cacheReadTokens: getNum(attrs, "cache_read_tokens"),
           cacheWriteTokens: getNum(attrs, "cache_creation_tokens"),
-          costUsd: typeof attrs["cost_usd"] === "number" ? attrs["cost_usd"] : 0,
+          costUsd: typeof attrs["cost_usd"] === "number" ? attrs["cost_usd"] : parseFloat(String(attrs["cost_usd"])) || 0,
           durationMs: getNum(attrs, "duration_ms"),
           timestamp,
         });

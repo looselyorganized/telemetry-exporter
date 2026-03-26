@@ -88,9 +88,11 @@ export function buildSessionRegistry(
       const sessionId = basename(entry, ".jsonl");
       if (!isUuid(sessionId)) continue;
 
-      upsertSession(sessionId, projId, cwd);
-      archiveSessionMapping(sessionId, projId, cwd);
-      registered++;
+      if (!getSession(sessionId)) {
+        upsertSession(sessionId, projId, cwd);
+        archiveSessionMapping(sessionId, projId, cwd);
+        registered++;
+      }
     }
 
     // Scan subagent directories: <session-uuid>/subagents/<uuid>.jsonl
@@ -102,9 +104,11 @@ export function buildSessionRegistry(
           if (!sf.endsWith(".jsonl")) continue;
           const subSessionId = basename(sf, ".jsonl");
           if (!isUuid(subSessionId)) continue;
-          upsertSession(subSessionId, projId, cwd);
-          archiveSessionMapping(subSessionId, projId, cwd);
-          registered++;
+          if (!getSession(subSessionId)) {
+            upsertSession(subSessionId, projId, cwd);
+            archiveSessionMapping(subSessionId, projId, cwd);
+            registered++;
+          }
         }
       } catch {
         // Not a session directory or no subagents
