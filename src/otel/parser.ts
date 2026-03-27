@@ -119,7 +119,8 @@ export function parseOtlpLogs(body: unknown): OtelLogEvent[] {
 
       for (const lr of logRecords) {
         const attrs = flattenAttributes(lr?.attributes);
-        const eventType = lr?.eventName ?? (attrs["event.name"] as string) ?? "unknown";
+        const bodyStr = lr?.body?.stringValue as string | undefined;
+        const eventType = lr?.eventName ?? bodyStr ?? (attrs["event.name"] as string) ?? "unknown";
         const sessionId = (attrs["session.id"] as string) ?? null;
         const timestamp = nanoToIso(lr?.timeUnixNano) ?? (attrs["event.timestamp"] as string) ?? null;
 
@@ -242,12 +243,18 @@ export function extractSessionId(record: { attributes?: OtlpAttribute[] }): stri
   return (attrs["session.id"] as string) ?? null;
 }
 
-/** Classify an event by its eventName or event.name attribute. */
+/**
+ * Classify an event by its name. Accepts both full form
+ * ("claude_code.api_request") and short form ("api_request")
+ * since Claude Code uses body.stringValue (full) and
+ * event.name attribute (short).
+ */
 export function classifyEvent(eventName: string): EventClass {
-  if (eventName === "claude_code.api_request") return "api_request";
-  if (eventName === "claude_code.tool_result") return "tool_result";
-  if (eventName === "claude_code.user_prompt") return "user_prompt";
-  if (eventName === "claude_code.api_error") return "api_error";
-  if (eventName === "claude_code.tool_decision") return "tool_decision";
+  const name = eventName.replace("claude_code.", "");
+  if (name === "api_request") return "api_request";
+  if (name === "tool_result") return "tool_result";
+  if (name === "user_prompt") return "user_prompt";
+  if (name === "api_error") return "api_error";
+  if (name === "tool_decision") return "tool_decision";
   return "unknown";
 }
