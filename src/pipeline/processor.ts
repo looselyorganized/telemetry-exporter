@@ -8,6 +8,48 @@ import type { OtelEventBatch } from "./otel-receiver";
 import { getSupabase } from "../db/client";
 import { formatModelStats, type LifetimeCounters } from "../../bin/daemon-helpers";
 
+// ─── Tool name → event type classification ──────────────────────────────────
+// Maps OTel tool_name to the same event types the JSONL emoji pipeline uses.
+// Must stay in sync with EMOJI_TYPE_MAP in parsers.ts.
+
+function classifyToolName(toolName: string): string {
+  const name = toolName.toLowerCase();
+
+  // Read tools
+  if (name === "read" || name === "cat") return "read";
+
+  // Search tools
+  if (name === "grep" || name === "glob" || name === "search") return "search";
+
+  // Fetch tools
+  if (name === "webfetch" || name === "websearch" || name === "fetch") return "fetch";
+
+  // MCP tools (prefixed with mcp__)
+  if (name.startsWith("mcp__") || name.startsWith("mcp_")) return "mcp";
+
+  // Skills
+  if (name === "skill") return "skill";
+
+  // Agent tools
+  if (name === "agent") return "agent_spawn";
+  if (name === "sendmessage") return "message";
+
+  // Task tools
+  if (name === "taskcreate" || name === "taskupdate" || name === "taskget" || name === "tasklist" || name === "taskstop" || name === "taskoutput") return "task";
+
+  // Plan tools
+  if (name === "enterplanmode" || name === "exitplanmode") return "plan";
+
+  // Tool search
+  if (name === "toolsearch") return "tool";
+
+  // Write/Edit tools — still "tool" (these are the core coding tools)
+  if (name === "write" || name === "edit" || name === "bash" || name === "notebookedit") return "tool";
+
+  // Default
+  return "tool";
+}
+
 // ─── SQL aggregation result shape ────────────────────────────────────────────
 
 interface EventAggRow {
@@ -460,10 +502,11 @@ export class Processor {
       }
 
       // 2. Process tool_result events → events target
+      // Classify by tool_name to match JSONL emoji-based types
       for (const tool of batch.toolResults) {
         enqueue("events", {
           project_id: tool.projId,
-          event_type: "tool",
+          event_type: classifyToolName(tool.toolName),
           event_text: `${tool.toolName} (${tool.success ? "success" : "failure"}, ${tool.durationMs}ms)`,
           timestamp: tool.timestamp,
         });
