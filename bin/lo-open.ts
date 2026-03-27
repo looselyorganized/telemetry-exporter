@@ -13,13 +13,11 @@
  */
 
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { readFileSync, existsSync, writeFileSync, unlinkSync } from "fs";
-import { join } from "path";
-import { $ } from "bun";
+import { readFileSync, existsSync, unlinkSync, readdirSync } from "fs";
+import { join, basename } from "path";
 import {
   EXPORTER_DIR,
   PID_FILE,
-  DASHBOARD_PID_FILE,
   DIM,
   RESET,
   BOLD,
@@ -262,57 +260,6 @@ async function checkTelemetry(
   );
 }
 
-async function launchDashboard(): Promise<void> {
-  // Kill any existing dashboard process (PID file or port holder)
-  if (existsSync(DASHBOARD_PID_FILE)) {
-    const oldPid = parseInt(readFileSync(DASHBOARD_PID_FILE, "utf-8").trim(), 10);
-    if (!isNaN(oldPid) && isProcessRunning(oldPid)) {
-      try {
-        process.kill(oldPid, "SIGTERM");
-        await Bun.sleep(500);
-      } catch {}
-    }
-    try { unlinkSync(DASHBOARD_PID_FILE); } catch {}
-  }
-
-  // Also kill anything holding port 7777 (stale process without PID file)
-  try {
-    const result = await $`lsof -ti :7777`.quiet();
-    const pids = result.stdout.toString().trim().split("\n").filter(Boolean);
-    for (const p of pids) {
-      try { process.kill(parseInt(p, 10), "SIGTERM"); } catch {}
-    }
-    if (pids.length > 0) await Bun.sleep(500);
-  } catch {}  // lsof returns non-zero if nothing found
-
-  // Spawn dashboard as a detached background process
-  const dashboardScript = join(EXPORTER_DIR, "bin", "dashboard.ts");
-  try {
-    const proc = Bun.spawn(["bun", "run", dashboardScript], {
-      cwd: EXPORTER_DIR,
-      stdio: ["ignore", "ignore", "ignore"],
-    });
-
-    if (proc.pid) {
-      writeFileSync(DASHBOARD_PID_FILE, String(proc.pid));
-      proc.unref();
-
-      // Wait briefly for server to start, then open browser
-      await Bun.sleep(1_000);
-      if (isProcessRunning(proc.pid)) {
-        try { Bun.spawn(["open", "-a", "Google Chrome", "http://localhost:7777"]); } catch {}
-        pass("Dashboard", `Running at http://localhost:7777 (PID ${proc.pid})`);
-      } else {
-        fail("Dashboard", "Process exited immediately");
-      }
-    } else {
-      fail("Dashboard", "Could not spawn process");
-    }
-  } catch (err: any) {
-    warn("Dashboard", `Could not start: ${err.message}`);
-  }
-}
-
 async function flipFacilityOpen(supabase: SupabaseClient): Promise<void> {
   const { error } = await supabase
     .from("facility_status")
@@ -355,7 +302,27 @@ async function main(): Promise<void> {
   const pid = checkExporter();
   await checkTelemetry(supabase);
   await flipFacilityOpen(supabase);
-  await launchDashboard();
+
+  // ─── To Do List ──────────────────────────────────────────────────────────
+  const todoDir = join(EXPORTER_DIR, "..", "docs", "todo");
+  if (existsSync(todoDir)) {
+    try {
+      const files = readdirSync(todoDir)
+        .filter((f) => f.endsWith(".md"))
+        .sort();
+
+      if (files.length > 0) {
+        console.log();
+        console.log(`  ${DIM}── To Do ──────────────────────────────${RESET}`);
+        for (const file of files) {
+          const name = basename(file, ".md")
+            .replace(/-/g, " ")
+            .replace(/\b\w/g, (c) => c.toUpperCase());
+          console.log(`  ${BOLD}☐${RESET}  ${name}  ${DIM}docs/todo/${file}${RESET}`);
+        }
+      }
+    } catch {}
+  }
 
   console.log();
   console.log(`  ${DIM}── Facility Open ──────────────────────${RESET}`);
