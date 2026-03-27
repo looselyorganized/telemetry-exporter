@@ -32,6 +32,29 @@ async function main(): Promise<void> {
     auth: { persistSession: false, autoRefreshToken: false },
   });
 
+  // ─── Shift Summary ────────────────────────────────────────────────────────
+  // Query today's cost from otel_api_requests
+  const { data: costData } = await supabase
+    .from("otel_api_requests")
+    .select("cost_usd")
+    .gte("timestamp", new Date().toISOString().split("T")[0]);
+
+  const todayCost = costData?.reduce((sum: number, r: Record<string, unknown>) => sum + (Number(r.cost_usd) || 0), 0) ?? 0;
+
+  // Query today's sessions from daily_metrics
+  const today = new Date().toISOString().split("T")[0];
+  const { data: metricsData } = await supabase
+    .from("daily_metrics")
+    .select("sessions, messages")
+    .eq("date", today);
+
+  const sessions = metricsData?.reduce((sum: number, r: Record<string, unknown>) => sum + (Number(r.sessions) || 0), 0) ?? 0;
+  const messages = metricsData?.reduce((sum: number, r: Record<string, unknown>) => sum + (Number(r.messages) || 0), 0) ?? 0;
+
+  console.log();
+  console.log(`  ${DIM}── Shift Summary ──────────────────────${RESET}`);
+  console.log(`  ${BOLD}$${todayCost.toFixed(2)}${RESET} spent · ${sessions} sessions · ${messages} messages`);
+
   // 1. Flip status to dormant
   const { error } = await supabase
     .from("facility_status")

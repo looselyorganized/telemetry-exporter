@@ -13,10 +13,9 @@
  */
 
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { readFileSync, existsSync, unlinkSync, readdirSync } from "fs";
-import { join, basename } from "path";
+import { readFileSync, existsSync, unlinkSync } from "fs";
+import { join } from "path";
 import {
-  EXPORTER_DIR,
   PID_FILE,
   DIM,
   RESET,
@@ -331,34 +330,13 @@ async function main(): Promise<void> {
   await checkSite();
   checkOtelEnv();
 
-  const pid = checkExporter();
+  checkExporter();
   await checkTelemetry(supabase);
   await flipFacilityOpen(supabase);
 
-  // ─── To Do List ──────────────────────────────────────────────────────────
-  const todoDir = join(EXPORTER_DIR, "..", "docs", "todo");
-  if (existsSync(todoDir)) {
-    try {
-      const files = readdirSync(todoDir)
-        .filter((f) => f.endsWith(".md"))
-        .sort();
-
-      if (files.length > 0) {
-        console.log();
-        console.log(`  ${DIM}── To Do ──────────────────────────────${RESET}`);
-        for (const file of files) {
-          const name = basename(file, ".md")
-            .replace(/-/g, " ")
-            .replace(/\b\w/g, (c) => c.toUpperCase());
-          console.log(`  ${BOLD}☐${RESET}  ${name}  ${DIM}docs/todo/${file}${RESET}`);
-        }
-      }
-    } catch {}
-  }
-
   console.log();
-  console.log(`  ${DIM}── Facility Open ──────────────────────${RESET}`);
-  console.log(`  ${BOLD}Exporter:${RESET} PID ${pid}`);
+  console.log(`  ${DIM}── Dashboard ──────────────────────────${RESET}`);
+  console.log(`  ${BOLD}https://looselyorganized.com/ops${RESET}`);
   console.log();
 }
 
