@@ -8,6 +8,7 @@
     "backfill": "bun run bin/daemon.ts --backfill",
     "open": "bun run bin/lo-open.ts",
     "close": "bun run bin/lo-close.ts",
+    "setup": "bun run bin/setup.ts",
     "test": "bun test"
   },
   "dependencies": {
