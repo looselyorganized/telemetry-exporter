@@ -8,10 +8,8 @@
  */
 
 import { statSync } from "fs";
-import { Database } from "bun:sqlite";
-import { initLocal, getLocal, getCursor, setCursor, otelEventsReceivedSince } from "../db/local";
-import { LogTailer } from "../parsers";
-import { readStatsCache, readModelStats } from "../parsers";
+import { initLocal, getCursor, setCursor, otelEventsReceivedSince } from "../db/local";
+import { LogTailer, readStatsCache, readModelStats } from "../parsers";
 import type { LogEntry, StatsCache, ModelStats } from "../parsers";
 import { scanProjectTokens } from "../project/scanner";
 import type { ProjectTokenMap } from "../project/scanner";
@@ -37,17 +35,15 @@ const CURSOR_SOURCE = "events.log";
 
 export class LogReceiver {
   private tailer: LogTailer;
-  private dbPath: string;
 
   constructor(logPath: string, dbPath: string) {
     this.tailer = new LogTailer(logPath);
-    this.dbPath = dbPath;
 
     // Ensure the DB is initialised (idempotent if already done)
     try {
       initLocal(dbPath);
     } catch {
-      // Already initialised — getLocal() will work
+      // Already initialised
     }
 
     // Restore cursor from SQLite

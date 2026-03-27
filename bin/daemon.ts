@@ -36,6 +36,7 @@ import { deleteProjectDailyMetrics } from "../src/db/metrics";
 import { readFileSync, writeFileSync, existsSync, unlinkSync, mkdirSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
+import { execFileSync } from "child_process";
 
 // ─── Config ────────────────────────────────────────────────────────────────
 const SUPABASE_URL = process.env.SUPABASE_URL;
@@ -89,6 +90,23 @@ initSupabase(SUPABASE_URL, SUPABASE_KEY);
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const DB_DIR = join(REPO_ROOT, "data");
 const DB_PATH = join(DB_DIR, "telemetry.db");
+
+// ─── Code-change detection ─────────────────────────────────────────────────
+// Record git commit at startup. If it changes, exit gracefully so launchd
+// restarts the daemon with the new code. Prevents stale-daemon bugs.
+function getGitHead(): string | null {
+  try {
+    return execFileSync("git", ["rev-parse", "HEAD"], { cwd: REPO_ROOT, encoding: "utf-8" }).trim();
+  } catch {
+    return null;
+  }
+}
+const STARTUP_COMMIT = getGitHead();
+function codeChanged(): boolean {
+  if (!STARTUP_COMMIT) return false;
+  const current = getGitHead();
+  return current !== null && current !== STARTUP_COMMIT;
+}
 mkdirSync(DB_DIR, { recursive: true });
 initLocal(DB_PATH);
 console.log(`  SQLite: ${DB_PATH}`);
@@ -120,7 +138,7 @@ const tokenReceiver = new TokenReceiver(resolver);
 const metricsReceiver = new MetricsReceiver();
 const otelReceiver = new OtelReceiver();
 const processor = new Processor(resolver, getLocal());
-const shipper = new Shipper(getLocal(), getSupabase());
+const shipper = new Shipper(getSupabase());
 await processor.hydrate();
 
 // ─── Gap detection ──────────────────────────────────────────────────────────
@@ -286,6 +304,12 @@ async function pipelineLoop(): Promise<never> {
 
       // Periodic maintenance (every 60 cycles / ~5 min)
       if (cycle % 60 === 0 && cycle > 0) {
+        // Code-change detection: exit if git HEAD has moved
+        if (codeChanged()) {
+          console.log(`  ${time()} — Code change detected (${STARTUP_COMMIT?.slice(0, 7)} → new). Exiting for restart.`);
+          shutdown();
+        }
+
         await processor.refreshResolver();
         refreshRegistry(resolver);
         await processor.refreshBaselines();

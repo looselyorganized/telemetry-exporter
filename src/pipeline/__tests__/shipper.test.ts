@@ -1,5 +1,4 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
-import { Database } from "bun:sqlite";
 import { mkdtempSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
@@ -313,7 +312,7 @@ describe("Shipper.ship()", () => {
       projects: { data: [], error: null },
       events: { data: [], error: null },
     });
-    const shipper = new Shipper(new Database(dbPath), supabase);
+    const shipper = new Shipper(supabase);
     const result = await shipper.ship();
 
     expect(result.shipped).toBe(2);
@@ -328,7 +327,7 @@ describe("Shipper.ship()", () => {
     enqueue("projects", { id: "proj_b", name: "Beta" });
 
     const supabase = mockSupabase({});
-    const shipper = new Shipper(new Database(dbPath), supabase);
+    const shipper = new Shipper(supabase);
     // Force circuit open
     (shipper as any).breaker.recordFailure();
     (shipper as any).breaker.recordFailure();
@@ -365,7 +364,7 @@ describe("Shipper.ship()", () => {
     enqueue("events", { project_id: "proj_a", event_type: "msg", event_text: "hi", timestamp: "2025-01-01T00:00:00Z" });
     enqueue("projects", { id: "proj_a", name: "Alpha" });
 
-    const shipper = new Shipper(new Database(dbPath), supabase);
+    const shipper = new Shipper(supabase);
     await shipper.ship();
 
     // projects (priority 1) must appear before events (priority 2)
@@ -378,7 +377,7 @@ describe("Shipper.ship()", () => {
     const supabase = mockSupabase({
       projects: { data: null, error: { message: "gateway timeout", code: "504" }, status: 504 },
     });
-    const shipper = new Shipper(new Database(dbPath), supabase);
+    const shipper = new Shipper(supabase);
     const result = await shipper.ship();
 
     expect(result.shipped).toBe(0);
@@ -393,7 +392,7 @@ describe("Shipper.ship()", () => {
     const supabase = mockSupabase({
       projects: { data: null, error: { message: "conflict" }, status: 409 },
     });
-    const shipper = new Shipper(new Database(dbPath), supabase);
+    const shipper = new Shipper(supabase);
     const result = await shipper.ship();
 
     expect(result.shipped).toBe(0);
@@ -420,7 +419,7 @@ describe("Shipper.ship()", () => {
       }),
     } as unknown as SupabaseClient;
 
-    const shipper = new Shipper(new Database(dbPath), supabase);
+    const shipper = new Shipper(supabase);
     const result = await shipper.ship();
 
     // All 3 are "shipped" (2 discarded as superseded, 1 actually sent)
@@ -441,7 +440,7 @@ describe("Shipper.ship()", () => {
       events: { data: [], error: null },
     });
 
-    const shipper = new Shipper(new Database(dbPath), supabase);
+    const shipper = new Shipper(supabase);
     const result = await shipper.ship();
 
     // proj_fail's project row permanently failed, events for proj_fail are blocked
@@ -481,7 +480,7 @@ describe("Shipper.ship()", () => {
       }),
     } as unknown as SupabaseClient;
 
-    const shipper = new Shipper(new Database(dbPath), supabase);
+    const shipper = new Shipper(supabase);
     await shipper.ship();
 
     expect(captured.length).toBe(1);
@@ -501,7 +500,7 @@ describe("Shipper.ship()", () => {
       projects: { data: [], error: null },
       events: { data: [], error: null },
     });
-    const shipper = new Shipper(new Database(dbPath), supabase);
+    const shipper = new Shipper(supabase);
     const result = await shipper.ship();
 
     expect(result.shipped).toBe(3);
@@ -523,7 +522,7 @@ describe("Shipper.shipArchive()", () => {
     const supabase = mockSupabase({
       outbox_archive: { data: [], error: null },
     });
-    const shipper = new Shipper(new Database(dbPath), supabase);
+    const shipper = new Shipper(supabase);
     const result = await shipper.shipArchive();
 
     expect(result.shipped).toBe(2);
@@ -537,7 +536,7 @@ describe("Shipper.shipArchive()", () => {
     const supabase = mockSupabase({
       outbox_archive: { data: null, error: { message: "server error" }, status: 503 },
     });
-    const shipper = new Shipper(new Database(dbPath), supabase);
+    const shipper = new Shipper(supabase);
     const result = await shipper.shipArchive();
 
     expect(result.shipped).toBe(0);
@@ -552,7 +551,7 @@ describe("Shipper delegation methods", () => {
 
   test("pruneShipped delegates to local pruneShipped", () => {
     const supabase = mockSupabase({});
-    const shipper = new Shipper(new Database(dbPath), supabase);
+    const shipper = new Shipper(supabase);
     // Should not throw when called
     expect(() => shipper.pruneShipped(7)).not.toThrow();
   });
@@ -562,7 +561,7 @@ describe("Shipper delegation methods", () => {
     enqueue("events", { project_id: "proj_b" });
 
     const supabase = mockSupabase({});
-    const shipper = new Shipper(new Database(dbPath), supabase);
+    const shipper = new Shipper(supabase);
     expect(shipper.outboxDepth()).toBe(2);
   });
 
@@ -571,7 +570,7 @@ describe("Shipper delegation methods", () => {
     enqueueArchive("event", JSON.stringify({ a: 2 }), "h2");
 
     const supabase = mockSupabase({});
-    const shipper = new Shipper(new Database(dbPath), supabase);
+    const shipper = new Shipper(supabase);
     expect(shipper.archiveDepth()).toBe(2);
   });
 });

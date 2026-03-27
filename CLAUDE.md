@@ -115,7 +115,7 @@ Several files resolve paths relative to `import.meta.dirname` or `import.meta.ur
 
 ### launchd Integration
 
-`com.lo.telemetry-exporter.plist` runs `bun run bin/daemon.ts` as a macOS user agent. Always running — starts on boot, restarts on crash. One-time setup: `bun run setup`. Logs go to `~/.claude/lo-exporter.{log,err}`.
+`com.lo.telemetry-exporter.plist` runs `bun run bin/daemon.ts` as a macOS user agent. Always running — starts on boot, restarts on crash. The daemon checks `git rev-parse HEAD` every 5 minutes and exits gracefully if the commit has changed, so launchd restarts it with the new code. One-time setup: `bun run setup`. Logs go to `~/.claude/lo-exporter.{log,err}`.
 
 ## Environment
 

@@ -4,9 +4,9 @@ import type { LogEntry, ModelStats, StatsCache } from "../parsers";
 import type { ProjectTokenMap } from "../project/scanner";
 import { computeTokensByProject } from "../project/scanner";
 import { enqueue, enqueueArchive, addKnownProject, getKnownProjectIds, upsertCostTracking, getCostByProject } from "../db/local";
-import type { OtelEventBatch, ApiRequestEvent } from "./otel-receiver";
+import type { OtelEventBatch } from "./otel-receiver";
 import { getSupabase } from "../db/client";
-import { sumValues, formatModelStats, type LifetimeCounters } from "../../bin/daemon-helpers";
+import { formatModelStats, type LifetimeCounters } from "../../bin/daemon-helpers";
 
 // ─── SQL aggregation result shape ────────────────────────────────────────────
 
@@ -25,7 +25,6 @@ export class Processor {
   private lifetimeBaseline: Map<string, LifetimeCounters> = new Map();
   private lastMetricsHash: string = "";
   private lastDailySync: string = "";
-  private lastProjectSync: string = "";
   private lastSnapshotTime: number = 0;
   private todayTokensTotal: number = 0;
   private lastDailyPayloads: Map<string, string> = new Map();
@@ -73,7 +72,7 @@ export class Processor {
 
       // Step 3: Enqueue each event
       for (const { entry, projId } of resolved) {
-        const timestamp = entry.parsedTimestamp?.toISOString() ?? null;
+        const timestamp = entry.parsedTimestamp?.toISOString() ?? new Date().toISOString();
         const eventPayload = {
           project_id: projId,
           event_type: entry.eventType,
@@ -196,7 +195,6 @@ export class Processor {
 
     // Determine if this is a fresh daily sync (date guard)
     const isNewDailySync = this.lastDailySync !== today;
-    const isNewProjectSync = this.lastProjectSync !== today;
 
     this.db.transaction(() => {
       // 5. Enqueue daily_metrics for each project/date
@@ -289,7 +287,6 @@ export class Processor {
       this.tokenBaseline = new Map(Object.entries(tokensByProject));
       this.lifetimeBaseline = new Map(Object.entries(lifetimeCounters));
       this.lastDailySync = today;
-      this.lastProjectSync = today;
     })();
   }
 

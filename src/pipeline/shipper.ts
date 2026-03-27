@@ -1,4 +1,3 @@
-import { Database } from "bun:sqlite";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { OutboxRow } from "../db/local";
 import type { ShipResult, ShippingStrategy } from "../db/types";
@@ -30,7 +29,6 @@ export const SHIPPING_STRATEGIES: Record<string, ShippingStrategy> = {
     table: "projects",
     method: "upsert",
     onConflict: "id",
-    ignoreDuplicates: false,
     batchSize: 50,
     fallbackToPerRow: true,
     priority: 1,
@@ -48,7 +46,6 @@ export const SHIPPING_STRATEGIES: Record<string, ShippingStrategy> = {
     table: "daily_metrics",
     method: "upsert",
     onConflict: "date,project_id",
-    ignoreDuplicates: false,
     batchSize: 100,
     fallbackToPerRow: true,
     priority: 3,
@@ -75,7 +72,6 @@ export const SHIPPING_STRATEGIES: Record<string, ShippingStrategy> = {
     table: "alerts",
     method: "upsert",
     onConflict: "project_id,alert_type,date",
-    ignoreDuplicates: false,
     batchSize: 10,
     fallbackToPerRow: true,
     priority: 0, // highest priority
@@ -83,7 +79,6 @@ export const SHIPPING_STRATEGIES: Record<string, ShippingStrategy> = {
   otel_api_requests: {
     table: "otel_api_requests",
     method: "insert",
-    ignoreDuplicates: true,
     batchSize: 100,
     fallbackToPerRow: true,
     priority: 2, // same priority as events
@@ -246,12 +241,10 @@ function stripFields(payload: Record<string, unknown>, excludeFields: string[]):
 }
 
 export class Shipper {
-  private db: Database;
   private supabase: SupabaseClient;
   private breaker: CircuitBreaker;
 
-  constructor(db: Database, supabase: SupabaseClient) {
-    this.db = db;
+  constructor(supabase: SupabaseClient) {
     this.supabase = supabase;
     this.breaker = new CircuitBreaker();
   }
@@ -295,10 +288,8 @@ export class Shipper {
         target === "project_telemetry";
 
       if (isProjectDependent && blockedProjIds.size > 0) {
-        const { allowed, blocked } = filterBlockedByFK(targetRows, blockedProjIds);
-        // Blocked rows stay pending — no action taken
+        const { allowed } = filterBlockedByFK(targetRows, blockedProjIds);
         targetRows = allowed;
-        void blocked; // acknowledged but not shipped/failed
       }
 
       if (targetRows.length === 0) continue;
@@ -334,33 +325,32 @@ export class Shipper {
 
       const ids = targetRows.map((r) => r.id);
 
-      const execute = async (batchIds: number[], batchPayloads: Record<string, unknown>[]) => {
-        let response: { data?: any; error?: any; status?: number };
-
+      const execute = async (batchPayloads: Record<string, unknown>[]) => {
         if (strategy.method === "upsert") {
-          const payload = batchPayloads.length === 1 ? batchPayloads : batchPayloads;
-          response = await (this.supabase
+          return this.supabase
             .from(strategy.table)
-            .upsert(payload, {
+            .upsert(batchPayloads, {
               onConflict: strategy.onConflict,
               ignoreDuplicates: strategy.ignoreDuplicates ?? false,
-            }) as Promise<{ data?: any; error?: any; status?: number }>);
-        } else {
-          // "update" — always single row
-          response = await (this.supabase
-            .from(strategy.table)
-            .update(batchPayloads[0])
-            .match(strategy.filter ?? {}) as Promise<{ data?: any; error?: any; status?: number }>);
+            });
         }
-
-        return response;
+        if (strategy.method === "insert") {
+          return this.supabase
+            .from(strategy.table)
+            .insert(batchPayloads);
+        }
+        // "update" — always single row
+        return this.supabase
+          .from(strategy.table)
+          .update(batchPayloads[0])
+          .match(strategy.filter ?? {});
       };
 
       const processResponse = (
         resp: { data?: any; error?: any; status?: number },
         batchIds: number[],
         targetKey: string,
-        projPayloads: Record<string, unknown>[]
+        batchPayloads: Record<string, unknown>[]
       ) => {
         if (!resp.error) {
           markShipped(batchIds);
@@ -384,7 +374,7 @@ export class Shipper {
 
             // Track project IDs that permanently failed for FK blocking
             if (targetKey === "projects") {
-              for (const p of projPayloads) {
+              for (const p of batchPayloads) {
                 if (typeof p.id === "string") {
                   blockedProjIds.add(p.id);
                 }
@@ -395,12 +385,12 @@ export class Shipper {
       };
 
       // Execute batch
-      const resp = await execute(ids, payloads);
+      const resp = await execute(payloads);
 
       if (resp.error && strategy.fallbackToPerRow) {
         // Retry per-row
         for (let i = 0; i < ids.length; i++) {
-          const singleResp = await execute([ids[i]], [payloads[i]]);
+          const singleResp = await execute([payloads[i]]);
           processResponse(singleResp, [ids[i]], target, [payloads[i]]);
         }
       } else {
@@ -425,33 +415,34 @@ export class Shipper {
     if (rows.length === 0) return result;
 
     const payloads = rows.map((r) => {
-      let parsed: Record<string, unknown>;
+      let parsed: unknown;
       try {
-        parsed = JSON.parse(r.payload) as Record<string, unknown>;
+        parsed = JSON.parse(r.payload);
       } catch {
-        parsed = { payload: r.payload };
+        parsed = r.payload;
       }
-      return { ...parsed, fact_type: r.fact_type, content_hash: r.content_hash };
+      return {
+        fact_type: r.fact_type,
+        payload: parsed,
+        content_hash: r.content_hash,
+        created_at: r.created_at,
+      };
     });
 
     const ids = rows.map((r) => r.id);
 
-    const resp = await (this.supabase
+    const resp = await this.supabase
       .from("outbox_archive")
-      .upsert(payloads, { onConflict: "fact_type,content_hash", ignoreDuplicates: true }) as Promise<{ data?: any; error?: any; status?: number }>);
+      .upsert(payloads, { onConflict: "fact_type,content_hash", ignoreDuplicates: true });
 
     if (!resp.error) {
       markArchiveShipped(ids);
       result.shipped += ids.length;
+    } else if (isTransient(resp.status)) {
+      // Archive rows have no retry_count mechanism — just leave unshipped
+      result.retriesScheduled += ids.length;
     } else {
-      const status = resp.status;
-      const errMsg = resp.error?.message ?? String(resp.error);
-      if (isTransient(status)) {
-        // Archive rows have no retry_count mechanism — just leave unshipped
-        result.retriesScheduled += ids.length;
-      } else {
-        result.failed += ids.length;
-      }
+      result.failed += ids.length;
     }
 
     result.circuitBreakerState = this.breaker.state;
@@ -480,10 +471,10 @@ export class Shipper {
     const projIds = lastUpdates.map((u) => u.projId).filter(Boolean);
     if (projIds.length === 0) return;
 
-    const resp = await (this.supabase
+    const resp = await this.supabase
       .from("project_telemetry")
       .select("project_id,tokens_lifetime,sessions_lifetime")
-      .in("project_id", projIds) as Promise<{ data?: any; error?: any }>);
+      .in("project_id", projIds);
 
     if (resp.error || !resp.data) {
       console.warn("[shipper:verify] failed to read back project_telemetry:", resp.error?.message);

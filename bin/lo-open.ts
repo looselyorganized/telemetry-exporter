@@ -159,8 +159,24 @@ async function checkSite(): Promise<void> {
   }
 }
 
+/**
+ * Read env vars from Claude Code's settings.json as a fallback.
+ * These are injected into Claude Code sessions but not into regular shells.
+ */
+function getClaudeCodeEnv(): Record<string, string> {
+  try {
+    const settingsPath = join(process.env.HOME ?? "", ".claude", "settings.json");
+    const settings = JSON.parse(readFileSync(settingsPath, "utf-8"));
+    return (settings?.env as Record<string, string>) ?? {};
+  } catch {
+    return {};
+  }
+}
+
 function checkOtelEnv(): void {
-  const telemetryEnabled = process.env.CLAUDE_CODE_ENABLE_TELEMETRY;
+  const ccEnv = getClaudeCodeEnv();
+
+  const telemetryEnabled = process.env.CLAUDE_CODE_ENABLE_TELEMETRY ?? ccEnv.CLAUDE_CODE_ENABLE_TELEMETRY;
   if (telemetryEnabled === "1") {
     pass("OTel", "CLAUDE_CODE_ENABLE_TELEMETRY=1");
   } else if (telemetryEnabled) {
@@ -169,14 +185,14 @@ function checkOtelEnv(): void {
     warn("OTel", "CLAUDE_CODE_ENABLE_TELEMETRY not set — OTel events will not flow");
   }
 
-  const endpoint = process.env.OTEL_EXPORTER_OTLP_ENDPOINT;
+  const endpoint = process.env.OTEL_EXPORTER_OTLP_ENDPOINT ?? ccEnv.OTEL_EXPORTER_OTLP_ENDPOINT;
   if (endpoint) {
     pass("OTel", `Endpoint: ${endpoint}`);
   } else {
     warn("OTel", "OTEL_EXPORTER_OTLP_ENDPOINT not set — Claude Code may use default");
   }
 
-  const protocol = process.env.OTEL_EXPORTER_OTLP_PROTOCOL;
+  const protocol = process.env.OTEL_EXPORTER_OTLP_PROTOCOL ?? ccEnv.OTEL_EXPORTER_OTLP_PROTOCOL;
   if (protocol === "http/json") {
     pass("OTel", "Protocol: http/json");
   } else if (protocol) {
@@ -247,6 +263,22 @@ async function checkTelemetry(
     const age = Math.round((Date.now() - secondUpdated.getTime()) / 1000);
     pass("Telemetry", `Data flowing (updated ${age}s ago)`);
     return;
+  }
+
+  // Before failing, check if the OTLP server is responding — the daemon may
+  // simply be idle (backlog drained, no active Claude sessions).
+  try {
+    const probe = await fetch("http://127.0.0.1:4318/v1/logs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ resourceLogs: [] }),
+    });
+    if (probe.ok) {
+      pass("Telemetry", `Idle — OTLP server healthy, last Supabase update ${Math.round(firstAge / 1000)}s ago`);
+      return;
+    }
+  } catch {
+    // OTLP server not responding — fall through to failure
   }
 
   fail(

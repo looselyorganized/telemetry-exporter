@@ -37,7 +37,7 @@ export interface ShipResult {
 
 export interface ShippingStrategy {
   table: string;
-  method: "upsert" | "update";
+  method: "upsert" | "update" | "insert";
   onConflict?: string;
   filter?: Record<string, unknown>;
   ignoreDuplicates?: boolean;

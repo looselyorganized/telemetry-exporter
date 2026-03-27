@@ -337,7 +337,7 @@ describe("Processor.processEvents", () => {
     expect(registrationRows).toHaveLength(0);
   });
 
-  test("event with null parsedTimestamp still enqueues with null timestamp", () => {
+  test("event with null parsedTimestamp enqueues with fallback timestamp", () => {
     const resolver = new MockResolver({
       "my-project": { projId: "proj_abc123", slug: "my-project" },
     });
@@ -352,7 +352,8 @@ describe("Processor.processEvents", () => {
       .all() as any[];
     expect(eventRows).toHaveLength(1);
     const payload = JSON.parse(eventRows[0].payload);
-    expect(payload.timestamp).toBeNull();
+    expect(payload.timestamp).not.toBeNull();
+    expect(new Date(payload.timestamp).getTime()).not.toBeNaN();
   });
 });
 

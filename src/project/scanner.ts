@@ -15,7 +15,7 @@ import { homedir } from "os";
 import { join } from "path";
 
 import { isDirectory } from "../utils";
-import { resolveProjId, loadLegacyMapping, normalizeFsPath, PROJECT_ROOT } from "./slug-resolver";
+import { resolveProjId, normalizeFsPath, PROJECT_ROOT } from "./slug-resolver";
 import type { ProjectResolver } from "./resolver";
 
 // ─── Constants ──────────────────────────────────────────────────────────────
@@ -120,12 +120,11 @@ export function resolveProjIdForDir(
     return null;
   }
 
-  // No resolver — original two-step resolution
+  // No resolver — resolve via git remote
   if (projectName) {
-    const projId = resolveProjId(join(PROJECT_ROOT, projectName));
-    if (projId) return projId;
+    return resolveProjId(join(PROJECT_ROOT, projectName));
   }
-  return loadLegacyMapping().get(encodedDirName) ?? null;
+  return null;
 }
 
 // ─── JSONL file discovery ───────────────────────────────────────────────────
