@@ -9,6 +9,7 @@ import { basename, dirname, join } from "path";
 import { homedir } from "os";
 
 import { resolveProjId, PROJECT_ROOT } from "../project/slug-resolver";
+import { readLoYml } from "../project/resolver";
 
 export interface ClaudeProcess {
   pid: number;
@@ -61,13 +62,18 @@ export function deriveProjectName(cwd: string): string {
 }
 
 /**
- * Derive content_slug from a working directory.
- * Maps dir name via deriveProjectName, then resolves the slug from project metadata.
+ * Derive proj_UUID from a working directory.
+ * Reads lo.yml for the canonical project ID (proj_*).
+ * Falls back to slug-resolver for legacy compat.
  */
 export function deriveProjId(cwd: string): string {
   const dirName = deriveProjectName(cwd);
   if (dirName === "unknown") return "unknown";
-  return resolveProjId(join(PROJECT_ROOT, dirName)) ?? "unknown";
+  const projDir = join(PROJECT_ROOT, dirName);
+  // Try lo.yml first (canonical project ID)
+  const loYmlId = readLoYml(projDir);
+  if (loYmlId) return loYmlId;
+  return resolveProjId(projDir) ?? "unknown";
 }
 
 /** Run a shell command, returning stdout or null on failure. */
