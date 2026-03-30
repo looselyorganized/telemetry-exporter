@@ -146,20 +146,20 @@ describe("groupByTarget", () => {
 // ---------------------------------------------------------------------------
 
 describe("sortByPriority", () => {
-  test("sorts targets by strategy priority (projects first, facility_metrics last)", () => {
+  test("sorts targets by strategy priority (sessions first, deprecated last)", () => {
     const targets = [
       "facility_metrics",
-      "project_telemetry",
+      "daily_rollups",
       "events",
       "projects",
-      "daily_metrics",
+      "sessions",
     ];
     const sorted = sortByPriority(targets);
     expect(sorted).toEqual([
+      "sessions",
       "projects",
       "events",
-      "daily_metrics",
-      "project_telemetry",
+      "daily_rollups",
       "facility_metrics",
     ]);
   });
@@ -593,8 +593,8 @@ describe("SHIPPING_STRATEGIES", () => {
     expect(SHIPPING_STRATEGIES.projects.priority).toBe(1);
   });
 
-  test("facility_metrics has lowest priority (5)", () => {
-    expect(SHIPPING_STRATEGIES.facility_metrics.priority).toBe(5);
+  test("facility_metrics has lowest priority (99, deprecated)", () => {
+    expect(SHIPPING_STRATEGIES.facility_metrics.priority).toBe(99);
   });
 
   test("events uses ignoreDuplicates", () => {

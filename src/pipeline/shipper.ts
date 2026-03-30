@@ -25,6 +25,15 @@ export type { ShipResult, ShippingStrategy } from "../db/types";
 // ---------------------------------------------------------------------------
 
 export const SHIPPING_STRATEGIES: Record<string, ShippingStrategy> = {
+  // Sessions must ship before otel_api_requests (FK dependency)
+  sessions: {
+    table: "sessions",
+    method: "upsert",
+    onConflict: "id",
+    batchSize: 50,
+    fallbackToPerRow: true,
+    priority: 0,
+  },
   projects: {
     table: "projects",
     method: "upsert",
@@ -42,13 +51,37 @@ export const SHIPPING_STRATEGIES: Record<string, ShippingStrategy> = {
     fallbackToPerRow: true,
     priority: 2,
   },
+  otel_api_requests: {
+    table: "otel_api_requests",
+    method: "insert",
+    batchSize: 100,
+    fallbackToPerRow: true,
+    priority: 2,
+  },
+  daily_rollups: {
+    table: "daily_rollups",
+    method: "upsert",
+    onConflict: "project_id,date",
+    batchSize: 100,
+    fallbackToPerRow: true,
+    priority: 3,
+  },
+  alerts: {
+    table: "alerts",
+    method: "upsert",
+    onConflict: "project_id,alert_type,date",
+    batchSize: 10,
+    fallbackToPerRow: true,
+    priority: 3,
+  },
+  // DEPRECATED — kept until processor stops writing to these targets (Tasks 6-9)
   daily_metrics: {
     table: "daily_metrics",
     method: "upsert",
     onConflict: "date,project_id",
     batchSize: 100,
     fallbackToPerRow: true,
-    priority: 3,
+    priority: 99,
   },
   project_telemetry: {
     table: "project_telemetry",
@@ -57,7 +90,7 @@ export const SHIPPING_STRATEGIES: Record<string, ShippingStrategy> = {
     excludeFields: ["active_agents", "agent_count"],
     batchSize: 50,
     fallbackToPerRow: true,
-    priority: 4,
+    priority: 99,
   },
   facility_metrics: {
     table: "facility_status",
@@ -66,22 +99,7 @@ export const SHIPPING_STRATEGIES: Record<string, ShippingStrategy> = {
     excludeFields: ["active_agents", "active_projects", "status"],
     batchSize: 1,
     fallbackToPerRow: false,
-    priority: 5,
-  },
-  alerts: {
-    table: "alerts",
-    method: "upsert",
-    onConflict: "project_id,alert_type,date",
-    batchSize: 10,
-    fallbackToPerRow: true,
-    priority: 0, // highest priority
-  },
-  otel_api_requests: {
-    table: "otel_api_requests",
-    method: "insert",
-    batchSize: 100,
-    fallbackToPerRow: true,
-    priority: 2, // same priority as events
+    priority: 99,
   },
 };
 
