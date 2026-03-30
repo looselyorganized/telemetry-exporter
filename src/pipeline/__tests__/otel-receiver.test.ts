@@ -50,7 +50,10 @@ describe("OtelReceiver", () => {
     const batch = receiver.poll();
     expect(batch.apiRequests).toEqual([]);
     expect(batch.toolResults).toEqual([]);
+    expect(batch.toolDecisionRejects).toEqual([]);
+    expect(batch.apiErrors).toEqual([]);
     expect(batch.unresolved).toBe(0);
+    expect(batch.skipped).toBe(0);
   });
 
   test("extracts api_request events with resolved sessions", () => {
@@ -73,7 +76,10 @@ describe("OtelReceiver", () => {
     const batch = receiver.poll();
 
     expect(batch.apiRequests).toHaveLength(1);
+    expect(batch.toolDecisionRejects).toEqual([]);
+    expect(batch.apiErrors).toEqual([]);
     expect(batch.unresolved).toBe(0);
+    expect(batch.skipped).toBe(0);
 
     const req = batch.apiRequests[0];
     expect(req.projId).toBe("proj_abc");

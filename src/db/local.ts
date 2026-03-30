@@ -508,6 +508,14 @@ export function markOtelEventsProcessed(ids: number[]): void {
   db.query(`UPDATE otel_events SET processed = 1 WHERE id IN (${placeholders})`).run(...ids);
 }
 
+/** Mark OTel events as skipped (non-LO project). */
+export function skipOtelEvents(ids: number[]): void {
+  if (ids.length === 0) return;
+  const db = getLocal();
+  const placeholders = ids.map(() => "?").join(",");
+  db.query(`UPDATE otel_events SET processed = 2 WHERE id IN (${placeholders})`).run(...ids);
+}
+
 export function pruneProcessedOtelEvents(olderThanDays: number): number {
   const db = getLocal();
   const result = db

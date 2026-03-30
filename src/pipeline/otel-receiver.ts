@@ -8,13 +8,54 @@
  * discover their session on a future refresh).
  */
 
+import { readdirSync } from "fs";
+import { join } from "path";
+import { homedir } from "os";
+
 import {
   getUnprocessedOtelEvents,
   markOtelEventsProcessed,
+  skipOtelEvents,
 } from "../db/local";
 import type { OtelEventRow } from "../db/local";
 import { lookupSession } from "../otel/session-registry";
 import { flattenAttributes } from "../otel/parser";
+
+const PROJECTS_DIR = join(homedir(), ".claude", "projects");
+const LO_ENCODED_PREFIX = "-users-bigviking-documents-github-projects-lo-";
+
+const loSessionCache = new Map<string, boolean | null>();
+
+function isLOSession(sessionId: string): boolean | null {
+  if (loSessionCache.has(sessionId)) return loSessionCache.get(sessionId)!;
+  let result: boolean | null = null;
+  try {
+    for (const dir of readdirSync(PROJECTS_DIR)) {
+      const dirPath = join(PROJECTS_DIR, dir);
+      try {
+        const files = readdirSync(dirPath);
+        if (files.includes(`${sessionId}.jsonl`)) {
+          result = dir.toLowerCase().startsWith(LO_ENCODED_PREFIX);
+          break;
+        }
+        for (const entry of files) {
+          if (entry.endsWith(".jsonl")) continue;
+          try {
+            const subDir = join(dirPath, entry, "subagents");
+            const subFiles = readdirSync(subDir);
+            if (subFiles.includes(`${sessionId}.jsonl`)) {
+              result = dir.toLowerCase().startsWith(LO_ENCODED_PREFIX);
+              break;
+            }
+          } catch {}
+        }
+        if (result !== null) break;
+      } catch {}
+    }
+  } catch {}
+  loSessionCache.set(sessionId, result);
+  return result;
+}
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -40,10 +81,29 @@ export interface ToolResultEvent {
   timestamp: string;
 }
 
+export interface ToolDecisionReject {
+  projId: string;
+  sessionId: string;
+  toolName: string;
+  timestamp: string;
+}
+
+export interface ApiErrorEvent {
+  projId: string;
+  sessionId: string;
+  error: string;
+  statusCode: number;
+  model: string;
+  timestamp: string;
+}
+
 export interface OtelEventBatch {
   apiRequests: ApiRequestEvent[];
   toolResults: ToolResultEvent[];
+  toolDecisionRejects: ToolDecisionReject[];
+  apiErrors: ApiErrorEvent[];
   unresolved: number;
+  skipped: number;
 }
 
 // ─── Attribute extraction helpers ───────────────────────────────────────────
@@ -78,7 +138,10 @@ export class OtelReceiver {
 
     const apiRequests: ApiRequestEvent[] = [];
     const toolResults: ToolResultEvent[] = [];
+    const toolDecisionRejects: ToolDecisionReject[] = [];
+    const apiErrors: ApiErrorEvent[] = [];
     const resolvedIds: number[] = [];
+    const skippedIds: number[] = [];
     let unresolved = 0;
 
     for (const row of rows) {
@@ -96,8 +159,18 @@ export class OtelReceiver {
 
       const session = lookupSession(row.session_id);
       if (!session) {
-        unresolved++;
-        continue; // leave unprocessed for retry
+        const isLO = isLOSession(row.session_id);
+        if (isLO === false) {
+          skippedIds.push(row.id);
+        } else {
+          const ageMs = Date.now() - new Date(row.received_at).getTime();
+          if (ageMs > 5 * 60 * 1000) {
+            skippedIds.push(row.id);
+          } else {
+            unresolved++;
+          }
+        }
+        continue;
       }
 
       // Parse the stored logRecord payload
@@ -145,16 +218,36 @@ export class OtelReceiver {
           timestamp,
         });
         resolvedIds.push(row.id);
+      } else if (row.event_type === "tool_decision") {
+        const decision = getStr(attrs, "decision");
+        if (decision === "reject") {
+          toolDecisionRejects.push({
+            projId: session.proj_id,
+            sessionId: row.session_id,
+            toolName: getStr(attrs, "tool_name"),
+            timestamp,
+          });
+        }
+        resolvedIds.push(row.id);
+      } else if (row.event_type === "api_error") {
+        apiErrors.push({
+          projId: session.proj_id,
+          sessionId: row.session_id,
+          error: getStr(attrs, "error"),
+          statusCode: getNum(attrs, "status_code"),
+          model: getStr(attrs, "model"),
+          timestamp,
+        });
+        resolvedIds.push(row.id);
       } else {
-        // Other classified events (user_prompt, api_error, tool_decision) —
-        // mark as processed, we don't need them in the pipeline yet
         resolvedIds.push(row.id);
       }
     }
 
     // Mark resolved events as processed
     markOtelEventsProcessed(resolvedIds);
+    skipOtelEvents(skippedIds);
 
-    return { apiRequests, toolResults, unresolved };
+    return { apiRequests, toolResults, toolDecisionRejects, apiErrors, unresolved, skipped: skippedIds.length };
   }
 }
