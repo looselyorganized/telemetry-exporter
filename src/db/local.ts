@@ -89,6 +89,14 @@ export function initLocal(dbPath: string): void {
   db.exec("PRAGMA busy_timeout = 5000");
 
   db.exec(SCHEMA);
+
+  // Migrate sessions table — ALTER TABLE adds columns that CREATE TABLE IF NOT EXISTS won't
+  try {
+    db.query("ALTER TABLE sessions ADD COLUMN parent_session_id TEXT").run();
+  } catch {} // column already exists
+  try {
+    db.query("ALTER TABLE sessions ADD COLUMN pid INTEGER").run();
+  } catch {} // column already exists
 }
 
 export function getLocal(): Database {
@@ -552,20 +560,23 @@ export function expireStaleOtelEvents(olderThanHours: number): number {
 export interface SessionRow {
   session_id: string;
   proj_id: string;
+  parent_session_id: string | null;
   cwd: string;
   first_seen: string;
+  pid: number | null;
 }
 
 export function upsertSession(
   sessionId: string,
   projId: string,
-  cwd: string
+  cwd: string,
+  parentSessionId?: string | null
 ): void {
   const db = getLocal();
   const now = new Date().toISOString();
   db.query(
-    "INSERT OR IGNORE INTO sessions (session_id, proj_id, cwd, first_seen) VALUES (?, ?, ?, ?)"
-  ).run(sessionId, projId, cwd, now);
+    "INSERT OR IGNORE INTO sessions (session_id, proj_id, parent_session_id, cwd, first_seen) VALUES (?, ?, ?, ?, ?)"
+  ).run(sessionId, projId, parentSessionId ?? null, cwd, now);
 }
 
 /** Count total registered sessions. */

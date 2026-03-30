@@ -16,7 +16,7 @@ import { join, basename } from "path";
 import { isDirectory } from "../utils";
 import { resolveProjIdForDir, resolveProjectName } from "../project/scanner";
 import { PROJECT_ROOT } from "../project/slug-resolver";
-import { upsertSession, getSession, enqueueArchive } from "../db/local";
+import { upsertSession, getSession, enqueueArchive, enqueue } from "../db/local";
 import type { SessionRow } from "../db/local";
 import type { ProjectResolver } from "../project/resolver";
 
@@ -91,6 +91,12 @@ export function buildSessionRegistry(
       if (!getSession(sessionId)) {
         upsertSession(sessionId, projId, cwd);
         archiveSessionMapping(sessionId, projId, cwd);
+        enqueue("sessions", {
+          id: sessionId,
+          project_id: projId,
+          parent_session_id: null,
+          started_at: new Date().toISOString(),
+        });
         registered++;
       }
     }
@@ -98,6 +104,7 @@ export function buildSessionRegistry(
     // Scan subagent directories: <session-uuid>/subagents/<uuid>.jsonl
     for (const entry of entries) {
       if (entry.endsWith(".jsonl")) continue;
+      if (!isUuid(entry)) continue;
       try {
         const subDir = join(dirPath, entry, "subagents");
         for (const sf of readdirSync(subDir)) {
@@ -105,8 +112,14 @@ export function buildSessionRegistry(
           const subSessionId = basename(sf, ".jsonl");
           if (!isUuid(subSessionId)) continue;
           if (!getSession(subSessionId)) {
-            upsertSession(subSessionId, projId, cwd);
+            upsertSession(subSessionId, projId, cwd, entry);
             archiveSessionMapping(subSessionId, projId, cwd);
+            enqueue("sessions", {
+              id: subSessionId,
+              project_id: projId,
+              parent_session_id: entry,
+              started_at: new Date().toISOString(),
+            });
             registered++;
           }
         }
