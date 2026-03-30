@@ -20,6 +20,7 @@ import { initSupabase, getSupabase } from "../src/db/client";
 import { setFacilitySwitch } from "../src/db/facility";
 import { pushAgentState } from "../src/db/agent-state";
 import { ProcessWatcher } from "../src/process/watcher";
+import { getFacilityState } from "../src/process/scanner";
 import { ProjectResolver } from "../src/project/resolver";
 import { reportError, clearErrors } from "../src/errors";
 import { flushErrors, pruneResolved, clearErrorsTable } from "../src/db/errors";
@@ -235,9 +236,10 @@ const watcher = new ProcessWatcher();
 async function watcherLoop(): Promise<never> {
   while (true) {
     try {
+      const state = getFacilityState();
       const diff = watcher.tick();
       if (diff) {
-        await pushAgentState(diff);
+        await pushAgentState(diff, state.processes);
         for (const event of diff.events) {
           console.log(`  ${new Date().toLocaleTimeString()} [${event.type}] ${event.project} (pid ${event.pid})`);
         }

@@ -11,6 +11,7 @@ export type ErrorCategory =
   | "facility_state"
   | "metrics_sync"
   | "telemetry_sync"
+  | "agent_state"
   | "supabase_transient";
 
 export interface ActiveError {

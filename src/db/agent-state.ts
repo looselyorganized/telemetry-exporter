@@ -1,81 +1,89 @@
 /**
- * Agent state push from ProcessWatcher.
- * Each write is individually labeled for error provenance.
+ * Agent state push — manages the ephemeral agent_state table in Supabase.
+ * INSERT when a new process appears, UPDATE on status/token changes, DELETE on exit.
  */
 
 import { getSupabase } from "./client";
 import { checkResult } from "./check-result";
 import type { ProcessDiff } from "../process/watcher";
+import type { ClaudeProcess } from "../process/scanner";
 
-/** Last-written per-project state for dirty checking. */
-const lastWrittenState = new Map<string, { count: number; active: number }>();
+/** Track which sessions we've already inserted. */
+const knownSessions = new Set<string>();
 
 /**
- * Push agent state changes from the ProcessWatcher.
- * Only writes agent-related fields — never touches aggregate metrics.
+ * Sync agent state from ProcessWatcher diff to Supabase agent_state table.
  */
-export async function pushAgentState(diff: ProcessDiff): Promise<void> {
+export async function pushAgentState(
+  diff: ProcessDiff,
+  processes: ClaudeProcess[],
+): Promise<void> {
   const now = new Date().toISOString();
   const writes: Promise<unknown>[] = [];
+  const supabase = getSupabase();
 
-  // Per-project telemetry updates (dirty-checked + parallel)
-  for (const [projId, counts] of diff.byProject) {
-    const last = lastWrittenState.get(projId);
+  // Build a PID→process lookup
+  const procByPid = new Map<number, ClaudeProcess>();
+  for (const p of processes) procByPid.set(p.pid, p);
 
-    // Skip if nothing changed for this project
-    if (last && last.count === counts.count && last.active === counts.active) {
-      continue;
-    }
+  for (const event of diff.events) {
+    const proc = procByPid.get(event.pid);
+    if (!proc?.sessionId || proc.projId === "unknown") continue;
 
-    const wasActive = last ? last.active > 0 : false;
-    lastWrittenState.set(projId, { count: counts.count, active: counts.active });
-
-    writes.push(
-      getSupabase()
-        .from("project_telemetry")
-        .update({
-          active_agents: counts.active,
-          agent_count: counts.count,
-          updated_at: now,
-        })
-        .eq("project_id", projId)
-        .then((result) => {
-          checkResult(result, {
-            operation: "pushAgentState.projectTelemetry",
-            category: "telemetry_sync",
-            entity: { projId },
-          });
-        })
-    );
-
-    // Only write last_active on idle→active transition
-    if (counts.active > 0 && !wasActive) {
+    if (event.type === "instance:created") {
+      knownSessions.add(proc.sessionId);
       writes.push(
-        getSupabase()
-          .from("projects")
-          .update({ last_active: now })
-          .eq("id", projId)
-          .then((result) => {
-            checkResult(result, {
-              operation: "pushAgentState.lastActive",
-              category: "project_registration",
-              entity: { projId },
-            });
+        supabase
+          .from("agent_state")
+          .upsert({
+            session_id: proc.sessionId,
+            project_id: proc.projId,
+            pid: proc.pid,
+            status: proc.isActive ? "active" : "idle",
+            parent_session_id: null,
+            started_at: now,
+            updated_at: now,
           })
+          .then((result) => checkResult(result, {
+            operation: "agentState.insert",
+            category: "agent_state",
+            entity: { sessionId: proc.sessionId },
+          }))
+      );
+    } else if (event.type === "instance:active" || event.type === "instance:idle") {
+      writes.push(
+        supabase
+          .from("agent_state")
+          .update({
+            status: event.type === "instance:active" ? "active" : "idle",
+            updated_at: now,
+          })
+          .eq("session_id", proc.sessionId)
+          .then((result) => checkResult(result, {
+            operation: "agentState.updateStatus",
+            category: "agent_state",
+            entity: { sessionId: proc.sessionId },
+          }))
+      );
+    } else if (event.type === "instance:closed") {
+      knownSessions.delete(proc.sessionId);
+      writes.push(
+        supabase
+          .from("agent_state")
+          .delete()
+          .eq("session_id", proc.sessionId)
+          .then((result) => checkResult(result, {
+            operation: "agentState.delete",
+            category: "agent_state",
+            entity: { sessionId: proc.sessionId },
+          }))
       );
     }
   }
 
-  // Clear cache for projects with no remaining processes
-  for (const projId of lastWrittenState.keys()) {
-    if (!diff.byProject.has(projId)) {
-      lastWrittenState.delete(projId);
-    }
-  }
-
-  // Facility write is always included (carries global state)
+  // Update facility_status heartbeat (status + updated_at only, no token fields)
   writes.push(
-    getSupabase()
+    supabase
       .from("facility_status")
       .update({
         active_agents: diff.facility.activeAgents,
@@ -83,12 +91,10 @@ export async function pushAgentState(diff: ProcessDiff): Promise<void> {
         updated_at: now,
       })
       .eq("id", 1)
-      .then((result) => {
-        checkResult(result, {
-          operation: "pushAgentState.facility",
-          category: "facility_state",
-        });
-      })
+      .then((result) => checkResult(result, {
+        operation: "agentState.facilityHeartbeat",
+        category: "facility_state",
+      }))
   );
 
   await Promise.all(writes);
