@@ -81,6 +81,7 @@ flowchart TD
         SHIP -->|"alerts (priority 0)"| ALT[("alerts")]
         SHIP -->|"projects (priority 1)"| PRJ[("projects")]
         SHIP -->|"events (priority 2)"| EVT[("events")]
+        SHIP -->|"otel_api_requests (priority 2)"| OAR[("otel_api_requests<br/>per-request tokens + cost")]
         SHIP -->|"daily_metrics (priority 3)"| DM[("daily_metrics<br/>.tokens = new JSONB format")]
         SHIP -->|"project_telemetry (priority 4)"| PT[("project_telemetry")]
         SHIP -->|"facility_metrics (priority 5)"| FS2[("facility_status")]

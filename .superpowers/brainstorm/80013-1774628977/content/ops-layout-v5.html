@@ -1,0 +1,297 @@
+<h2>Facility Ops — V5</h2>
+<p class="subtitle">Date range right-aligned, notification dropdown, 2-row stacking project grid</p>
+
+<div class="mockup">
+  <div class="mockup-header">http://looselyorganized.com/ops — wide screen (1440px+)</div>
+  <div class="mockup-body" style="padding:0; font-family: 'IBM Plex Mono', monospace; font-size: 11px; background: #141414; color: #E8E2D4; display:flex; min-height:580px;">
+
+    <!-- LEFT NAV -->
+    <div style="width:48px; background:#1a1a1a; border-right:1px dashed #333; display:flex; flex-direction:column; align-items:center; padding-top:12px; gap:20px; flex-shrink:0;">
+      <div style="width:28px; height:28px; border:1px dashed #333; border-radius:4px; display:flex; align-items:center; justify-content:center; font-size:8px; font-weight:bold; color:#E8E2D4; cursor:pointer;">LO</div>
+      <div style="width:28px; height:28px; background:#E8E2D4; border-radius:4px; display:flex; align-items:center; justify-content:center; cursor:pointer;">
+        <span style="font-size:14px; filter:invert(1);">⊞</span>
+      </div>
+      <div style="width:28px; height:28px; border:1px dashed #333; border-radius:4px; display:flex; align-items:center; justify-content:center; cursor:pointer; color:#9E9888;">
+        <span style="font-size:13px;">☰</span>
+      </div>
+      <div style="width:28px; height:28px; border:1px dashed #333; border-radius:4px; display:flex; align-items:center; justify-content:center; cursor:pointer; color:#9E9888;">
+        <span style="font-size:13px;">⚙</span>
+      </div>
+      <div style="flex:1;"></div>
+      <div style="margin-bottom:12px;"><span style="color:#4CAF50; font-size:10px;">●</span></div>
+    </div>
+
+    <!-- MAIN AREA -->
+    <div style="flex:1; display:flex; flex-direction:column; overflow:hidden;">
+
+      <!-- HEADER BAR -->
+      <div style="display:flex; gap:0; background:#1a1a1a; border-bottom:1px dashed #333; align-items:stretch; font-size:10px; flex-shrink:0;">
+
+        <!-- Facility Stats -->
+        <div style="display:flex; align-items:center; gap:16px; padding:10px 16px; border-right:1px dashed #333;">
+          <div><span style="color:#9E9888; font-size:8px; text-transform:uppercase;">Cost</span><br><span style="font-weight:bold; font-size:14px;">$14.37</span></div>
+          <div><span style="color:#9E9888; font-size:8px; text-transform:uppercase;">Tokens</span><br><span style="font-weight:bold; font-size:14px;">65.1M</span></div>
+          <div><span style="color:#9E9888; font-size:8px; text-transform:uppercase;">Sessions</span><br><span style="font-size:12px;">5</span></div>
+          <div><span style="color:#9E9888; font-size:8px; text-transform:uppercase;">Messages</span><br><span style="font-size:12px;">29</span></div>
+        </div>
+
+        <!-- Model Breakdown -->
+        <div style="display:flex; align-items:center; gap:12px; padding:10px 16px; border-right:1px dashed #333;">
+          <div><span style="color:#c49bff; font-size:9px;">● Opus 4.6</span> <span style="font-size:11px;">62.7M</span></div>
+          <div><span style="color:#7cc8ff; font-size:9px;">● Haiku 4.5</span> <span style="font-size:11px;">2.4M</span></div>
+        </div>
+
+        <!-- Spacer -->
+        <div style="flex:1;"></div>
+
+        <!-- Time Range (right-aligned, replaces date) -->
+        <div style="display:flex; align-items:center; gap:2px; padding:10px 14px; border-left:1px dashed #333;">
+          <span style="background:#E8E2D4; color:#141414; padding:3px 10px; font-size:9px; font-weight:bold; border-radius:2px; cursor:pointer;">Today</span>
+          <span style="color:#9E9888; padding:3px 10px; font-size:9px; cursor:pointer; border-radius:2px;">7D</span>
+          <span style="color:#9E9888; padding:3px 10px; font-size:9px; cursor:pointer; border-radius:2px;">30D</span>
+          <span style="color:#9E9888; padding:3px 10px; font-size:9px; cursor:pointer; border-radius:2px;">All</span>
+        </div>
+
+        <!-- Notification bell with dropdown preview -->
+        <div style="display:flex; align-items:center; padding:10px 16px; cursor:pointer; position:relative; border-left:1px dashed #333;">
+          <span style="font-size:14px; color:#9E9888;">🔔</span>
+          <span style="position:absolute; top:6px; right:12px; background:#EF5350; color:#141414; font-size:7px; font-weight:bold; width:12px; height:12px; border-radius:6px; display:flex; align-items:center; justify-content:center;">2</span>
+
+          <!-- Dropdown (shown for mockup) -->
+          <div style="position:absolute; top:100%; right:0; width:300px; background:#1a1a1a; border:1px dashed #333; border-radius:4px; z-index:10; box-shadow: 0 4px 20px rgba(0,0,0,0.5);">
+            <div style="padding:8px 12px; border-bottom:1px dashed #333; display:flex; justify-content:space-between; align-items:center;">
+              <span style="font-size:9px; font-weight:bold; text-transform:uppercase; letter-spacing:0.5px; color:#9E9888;">Notifications</span>
+              <span style="font-size:8px; color:#9E9888; cursor:pointer;">Mark all read</span>
+            </div>
+            <div style="padding:10px 12px; border-bottom:1px dashed #282828; font-size:9px;">
+              <div style="display:flex; align-items:flex-start; gap:8px;">
+                <span style="color:#EF5350; flex-shrink:0; margin-top:1px;">⚠</span>
+                <div>
+                  <div style="color:#C4BFAF;">telemetry-exporter passed <strong>$10</strong> budget threshold</div>
+                  <div style="color:#9E9888; font-size:8px; margin-top:2px;">Today 09:14 AM</div>
+                </div>
+                <span style="color:#555; cursor:pointer; flex-shrink:0; font-size:10px;">✕</span>
+              </div>
+            </div>
+            <div style="padding:10px 12px; border-bottom:1px dashed #282828; font-size:9px;">
+              <div style="display:flex; align-items:flex-start; gap:8px;">
+                <span style="color:#ff9800; flex-shrink:0; margin-top:1px;">⚡</span>
+                <div>
+                  <div style="color:#C4BFAF;">Archive backlog: <strong>38k</strong> rows draining</div>
+                  <div style="color:#9E9888; font-size:8px; margin-top:2px;">Today 08:35 AM</div>
+                </div>
+                <span style="color:#555; cursor:pointer; flex-shrink:0; font-size:10px;">✕</span>
+              </div>
+            </div>
+            <div style="padding:8px 12px; text-align:center;">
+              <span style="color:#9E9888; font-size:9px; cursor:pointer; text-decoration:underline; text-decoration-style:dashed;">See all notifications</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- SCROLLING NOTIFICATION TICKER -->
+      <div style="background:#1e1408; border-bottom:1px dashed #333; padding:5px 16px; font-size:9px; display:flex; align-items:center; gap:8px; flex-shrink:0; overflow:hidden;">
+        <span style="color:#ff9800; font-size:10px; flex-shrink:0;">⚠</span>
+        <div style="overflow:hidden; white-space:nowrap; flex:1;">
+          <span style="color:#C4BFAF; display:inline-block; animation: scroll 20s linear infinite;">
+            telemetry-exporter passed $10 budget threshold &nbsp;&nbsp;·&nbsp;&nbsp; Archive backlog: 38k rows draining &nbsp;&nbsp;·&nbsp;&nbsp; telemetry-exporter passed $10 budget threshold &nbsp;&nbsp;·&nbsp;&nbsp; Archive backlog: 38k rows draining
+          </span>
+        </div>
+        <span style="color:#555; cursor:pointer; flex-shrink:0; font-size:8px;">1 of 2 ›</span>
+      </div>
+
+      <!-- PROJECT CARDS: 2-row grid with horizontal scroll -->
+      <div style="flex:1; overflow-x:auto; overflow-y:hidden; padding:14px; display:grid; grid-template-rows: 1fr 1fr; grid-auto-flow: column; grid-auto-columns: 310px; gap:12px; align-content:start;">
+
+        <!-- ROW 1, COL 1: telemetry-exporter (ACTIVE, WAITING) -->
+        <div style="background:#1a1a1a; border:1px dashed #333; border-radius:6px; padding:14px; position:relative; box-shadow: 0 0 12px rgba(255, 152, 0, 0.15);">
+          <div style="position:absolute; top:-1px; left:-1px; right:-1px; bottom:-1px; border:1px solid rgba(255, 152, 0, 0.4); border-radius:6px; pointer-events:none;"></div>
+
+          <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:8px;">
+            <div>
+              <span style="color:#4CAF50; font-weight:bold; font-size:12px;">telemetry-exporter</span>
+              <div style="color:#4CAF50; font-size:9px; margin-top:2px;">active · 2 agents</div>
+            </div>
+          </div>
+          <div style="display:flex; gap:14px; margin-bottom:10px; font-size:10px;">
+            <div><span style="color:#9E9888; font-size:8px;">COST</span><br><span style="font-size:14px; font-weight:bold;">$14.37</span></div>
+            <div><span style="color:#9E9888; font-size:8px;">TOKENS</span><br><span style="font-size:14px; font-weight:bold;">62.7M</span></div>
+            <div><span style="color:#9E9888; font-size:8px;">SESSIONS</span><br><span>3</span></div>
+            <div><span style="color:#9E9888; font-size:8px;">MSGS</span><br><span>22</span></div>
+          </div>
+          <div style="display:flex; align-items:flex-end; gap:3px; height:22px; margin-bottom:10px;">
+            <div style="flex:1;display:flex;flex-direction:column;align-items:center;"><div style="width:100%;height:4px;background:#1e3a1e;border-radius:1px;"></div><span style="font-size:7px;color:#555;margin-top:1px;">21</span></div>
+            <div style="flex:1;display:flex;flex-direction:column;align-items:center;"><div style="width:100%;height:2px;background:#1e3a1e;border-radius:1px;"></div><span style="font-size:7px;color:#555;margin-top:1px;">22</span></div>
+            <div style="flex:1;display:flex;flex-direction:column;align-items:center;"><div style="width:100%;height:6px;background:#1e3a1e;border-radius:1px;"></div><span style="font-size:7px;color:#555;margin-top:1px;">23</span></div>
+            <div style="flex:1;display:flex;flex-direction:column;align-items:center;"><div style="width:100%;height:8px;background:#1e3a1e;border-radius:1px;"></div><span style="font-size:7px;color:#555;margin-top:1px;">24</span></div>
+            <div style="flex:1;display:flex;flex-direction:column;align-items:center;"><div style="width:100%;height:5px;background:#1e3a1e;border-radius:1px;"></div><span style="font-size:7px;color:#555;margin-top:1px;">25</span></div>
+            <div style="flex:1;display:flex;flex-direction:column;align-items:center;"><div style="width:100%;height:10px;background:#2a5a2a;border-radius:1px;"></div><span style="font-size:7px;color:#555;margin-top:1px;">26</span></div>
+            <div style="flex:1;display:flex;flex-direction:column;align-items:center;"><div style="width:100%;height:20px;background:#4CAF50;border-radius:1px;"></div><span style="font-size:7px;color:#9E9888;margin-top:1px;">27</span></div>
+          </div>
+          <!-- Agents -->
+          <div style="background:#141414; border:1px dashed #333; border-radius:3px; padding:8px 10px; font-size:9px;">
+            <div style="color:#9E9888; font-size:8px; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:5px;">Agents</div>
+            <div style="display:flex; align-items:center; gap:6px; margin-bottom:5px;">
+              <span style="color:#4CAF50;">●</span>
+              <span style="color:#C4BFAF;">PID 93783</span>
+              <span style="color:#9E9888;">Opus · 699MB · 2h04m</span>
+              <span style="flex:1;"></span>
+              <span style="font-size:11px;" title="Waiting for input">👋</span>
+            </div>
+            <div style="margin-left:14px; border-left:1px dashed #333; padding-left:8px; font-size:8px;">
+              <div style="color:#9E9888; margin-bottom:2px;">├ <span style="color:#c49bff;">Explore</span> pipeline <span style="color:#4CAF50;">●</span></div>
+              <div style="color:#9E9888; margin-bottom:2px;">├ <span style="color:#c49bff;">Audit</span> Supabase <span style="color:#555;">done</span></div>
+              <div style="color:#9E9888;">└ <span style="color:#c49bff;">Check</span> 24h loss <span style="color:#555;">done</span></div>
+            </div>
+            <div style="margin-top:6px; padding-top:5px; border-top:1px dashed #282828; display:flex; align-items:center; gap:6px;">
+              <span style="color:#ff9800;">●</span>
+              <span style="color:#C4BFAF;">PID 91608</span>
+              <span style="color:#9E9888;">Opus · 273MB · 2h05m</span>
+              <span style="flex:1;"></span>
+              <span style="font-size:11px;" title="Needs permission">🔐</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- ROW 2, COL 1: lo (ACTIVE) -->
+        <div style="background:#1a1a1a; border:1px dashed #333; border-radius:6px; padding:14px;">
+          <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:8px;">
+            <div>
+              <span style="color:#4CAF50; font-weight:bold; font-size:12px;">lo</span>
+              <div style="color:#4CAF50; font-size:9px; margin-top:2px;">active · 1 agent</div>
+            </div>
+          </div>
+          <div style="display:flex; gap:14px; margin-bottom:10px; font-size:10px;">
+            <div><span style="color:#9E9888; font-size:8px;">COST</span><br><span style="font-size:14px; font-weight:bold;">$2.41</span></div>
+            <div><span style="color:#9E9888; font-size:8px;">TOKENS</span><br><span style="font-size:14px; font-weight:bold;">2.4M</span></div>
+            <div><span style="color:#9E9888; font-size:8px;">SESSIONS</span><br><span>2</span></div>
+            <div><span style="color:#9E9888; font-size:8px;">MSGS</span><br><span>7</span></div>
+          </div>
+          <div style="display:flex; align-items:flex-end; gap:3px; height:22px; margin-bottom:10px;">
+            <div style="flex:1;display:flex;flex-direction:column;align-items:center;"><div style="width:100%;height:6px;background:#1e3a1e;border-radius:1px;"></div><span style="font-size:7px;color:#555;margin-top:1px;">21</span></div>
+            <div style="flex:1;display:flex;flex-direction:column;align-items:center;"><div style="width:100%;height:3px;background:#1e3a1e;border-radius:1px;"></div><span style="font-size:7px;color:#555;margin-top:1px;">22</span></div>
+            <div style="flex:1;display:flex;flex-direction:column;align-items:center;"><div style="width:100%;height:0px;background:#1e3a1e;border-radius:1px;"></div><span style="font-size:7px;color:#555;margin-top:1px;">23</span></div>
+            <div style="flex:1;display:flex;flex-direction:column;align-items:center;"><div style="width:100%;height:2px;background:#1e3a1e;border-radius:1px;"></div><span style="font-size:7px;color:#555;margin-top:1px;">24</span></div>
+            <div style="flex:1;display:flex;flex-direction:column;align-items:center;"><div style="width:100%;height:8px;background:#1e3a1e;border-radius:1px;"></div><span style="font-size:7px;color:#555;margin-top:1px;">25</span></div>
+            <div style="flex:1;display:flex;flex-direction:column;align-items:center;"><div style="width:100%;height:12px;background:#2a5a2a;border-radius:1px;"></div><span style="font-size:7px;color:#555;margin-top:1px;">26</span></div>
+            <div style="flex:1;display:flex;flex-direction:column;align-items:center;"><div style="width:100%;height:10px;background:#4CAF50;border-radius:1px;"></div><span style="font-size:7px;color:#9E9888;margin-top:1px;">27</span></div>
+          </div>
+          <div style="background:#141414; border:1px dashed #333; border-radius:3px; padding:8px 10px; font-size:9px;">
+            <div style="color:#9E9888; font-size:8px; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:5px;">Agents</div>
+            <div style="display:flex; align-items:center; gap:6px;">
+              <span style="color:#ff9800;">●</span>
+              <span style="color:#C4BFAF;">PID 91608</span>
+              <span style="color:#9E9888;">Opus · 273MB · 2h05m · 0.7%</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- ROW 1, COL 2: platform (IDLE) -->
+        <div style="background:#1a1a1a; border:1px dashed #333; border-radius:6px; padding:14px; opacity:0.7;">
+          <div style="margin-bottom:8px;">
+            <span style="color:#C4BFAF; font-weight:bold; font-size:12px;">platform</span>
+            <div style="color:#9E9888; font-size:9px; margin-top:2px;">idle · 19h ago</div>
+          </div>
+          <div style="display:flex; gap:14px; margin-bottom:10px; font-size:10px;">
+            <div><span style="color:#9E9888; font-size:8px;">COST</span><br><span style="color:#9E9888;">$0.00</span></div>
+            <div><span style="color:#9E9888; font-size:8px;">TOKENS</span><br><span style="color:#9E9888;">0</span></div>
+            <div><span style="color:#9E9888; font-size:8px;">SESSIONS</span><br><span style="color:#C4BFAF;">828</span></div>
+            <div><span style="color:#9E9888; font-size:8px;">MSGS</span><br><span style="color:#C4BFAF;">16,943</span></div>
+          </div>
+          <div style="display:flex; align-items:flex-end; gap:3px; height:22px;">
+            <div style="flex:1;display:flex;flex-direction:column;align-items:center;"><div style="width:100%;height:12px;background:#282828;border-radius:1px;"></div><span style="font-size:7px;color:#555;margin-top:1px;">21</span></div>
+            <div style="flex:1;display:flex;flex-direction:column;align-items:center;"><div style="width:100%;height:8px;background:#282828;border-radius:1px;"></div><span style="font-size:7px;color:#555;margin-top:1px;">22</span></div>
+            <div style="flex:1;display:flex;flex-direction:column;align-items:center;"><div style="width:100%;height:3px;background:#282828;border-radius:1px;"></div><span style="font-size:7px;color:#555;margin-top:1px;">23</span></div>
+            <div style="flex:1;display:flex;flex-direction:column;align-items:center;"><div style="width:100%;height:15px;background:#282828;border-radius:1px;"></div><span style="font-size:7px;color:#555;margin-top:1px;">24</span></div>
+            <div style="flex:1;display:flex;flex-direction:column;align-items:center;"><div style="width:100%;height:6px;background:#282828;border-radius:1px;"></div><span style="font-size:7px;color:#555;margin-top:1px;">25</span></div>
+            <div style="flex:1;display:flex;flex-direction:column;align-items:center;"><div style="width:100%;height:10px;background:#282828;border-radius:1px;"></div><span style="font-size:7px;color:#555;margin-top:1px;">26</span></div>
+            <div style="flex:1;display:flex;flex-direction:column;align-items:center;"><div style="width:100%;height:0px;border-radius:1px;"></div><span style="font-size:7px;color:#555;margin-top:1px;">27</span></div>
+          </div>
+        </div>
+
+        <!-- ROW 2, COL 2: lorf-agent-zip (IDLE) -->
+        <div style="background:#1a1a1a; border:1px dashed #333; border-radius:6px; padding:14px; opacity:0.7;">
+          <div style="margin-bottom:8px;">
+            <span style="color:#C4BFAF; font-weight:bold; font-size:12px;">lorf-agent-zip</span>
+            <div style="color:#9E9888; font-size:9px; margin-top:2px;">idle · 2d ago</div>
+          </div>
+          <div style="display:flex; gap:14px; font-size:10px;">
+            <div><span style="color:#9E9888; font-size:8px;">COST</span><br><span style="color:#9E9888;">$0.00</span></div>
+            <div><span style="color:#9E9888; font-size:8px;">TOKENS</span><br><span style="color:#9E9888;">0</span></div>
+            <div><span style="color:#9E9888; font-size:8px;">SESSIONS</span><br><span style="color:#C4BFAF;">0</span></div>
+            <div><span style="color:#9E9888; font-size:8px;">MSGS</span><br><span style="color:#C4BFAF;">437</span></div>
+          </div>
+        </div>
+
+        <!-- ROW 1, COL 3: org-root (IDLE) -->
+        <div style="background:#1a1a1a; border:1px dashed #333; border-radius:6px; padding:14px; opacity:0.7;">
+          <div style="margin-bottom:8px;">
+            <span style="color:#C4BFAF; font-weight:bold; font-size:12px;">org-root</span>
+            <div style="color:#9E9888; font-size:9px; margin-top:2px;">idle · 2h ago</div>
+          </div>
+          <div style="display:flex; gap:14px; font-size:10px;">
+            <div><span style="color:#9E9888; font-size:8px;">COST</span><br><span style="color:#9E9888;">$0.00</span></div>
+            <div><span style="color:#9E9888; font-size:8px;">TOKENS</span><br><span style="color:#9E9888;">0</span></div>
+            <div><span style="color:#9E9888; font-size:8px;">SESSIONS</span><br><span style="color:#C4BFAF;">3,479</span></div>
+            <div><span style="color:#9E9888; font-size:8px;">MSGS</span><br><span style="color:#C4BFAF;">23,268</span></div>
+          </div>
+        </div>
+
+        <!-- ROW 2, COL 3: claude-dashboard (IDLE) -->
+        <div style="background:#1a1a1a; border:1px dashed #333; border-radius:6px; padding:14px; opacity:0.7;">
+          <div style="margin-bottom:8px;">
+            <span style="color:#C4BFAF; font-weight:bold; font-size:12px;">claude-dashboard</span>
+            <div style="color:#9E9888; font-size:9px; margin-top:2px;">idle · 2d ago</div>
+          </div>
+          <div style="display:flex; gap:14px; font-size:10px;">
+            <div><span style="color:#9E9888; font-size:8px;">COST</span><br><span style="color:#9E9888;">$0.00</span></div>
+            <div><span style="color:#9E9888; font-size:8px;">TOKENS</span><br><span style="color:#9E9888;">0</span></div>
+            <div><span style="color:#9E9888; font-size:8px;">SESSIONS</span><br><span style="color:#C4BFAF;">969</span></div>
+            <div><span style="color:#9E9888; font-size:8px;">MSGS</span><br><span style="color:#C4BFAF;">6,563</span></div>
+          </div>
+        </div>
+
+        <!-- ADD card (spans both rows) -->
+        <div style="grid-row: 1 / 3; min-width:100px; background:transparent; border:1px dashed #333; border-radius:6px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:8px; cursor:pointer;">
+          <span style="color:#333; font-size:24px;">+</span>
+          <span style="color:#555; font-size:9px;">Add</span>
+        </div>
+
+      </div>
+
+      <!-- HEALTH STRIP -->
+      <div style="display:flex; gap:16px; padding:8px 16px; background:#1a1a1a; border-top:1px dashed #333; align-items:center; font-size:10px; flex-shrink:0;">
+        <span style="color:#4CAF50; font-weight:bold; text-transform:uppercase; letter-spacing:0.5px;">● Operational</span>
+        <span style="color:#333;">│</span>
+        <span>Supabase <span style="color:#4CAF50;">✓</span></span>
+        <span>OTLP <span style="color:#4CAF50;">✓</span></span>
+        <span>Pipeline <span style="color:#4CAF50;">✓</span></span>
+        <span>Site <span style="color:#4CAF50;">✓</span></span>
+        <span style="color:#333;">│</span>
+        <span style="color:#9E9888;">972MB RAM · 2 instances</span>
+        <span style="color:#333;">│</span>
+        <span style="color:#9E9888;">Outbox: 0 · Archive: 38k</span>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<style>
+  @keyframes scroll {
+    0% { transform: translateX(0); }
+    100% { transform: translateX(-50%); }
+  }
+</style>
+
+<div style="margin-top:20px; padding:16px; border:1px dashed #555; border-radius:4px; font-size:13px; line-height:1.8;">
+  <h3 style="margin-top:0;">V5 Changes</h3>
+  <ul style="margin:0; padding-left:20px;">
+    <li><strong>Header reordered</strong> — [Stats] [Models] [———spacer———] [Today 7D 30D All] [🔔 Bell]. Date removed, time range takes its spot on the right.</li>
+    <li><strong>Notification bell dropdown</strong> — Click reveals list of recent alerts with timestamps, dismiss (✕) per item, "Mark all read", and "See all notifications" link at bottom.</li>
+    <li><strong>2-row stacking grid</strong> — Uses CSS <code>grid-template-rows: 1fr 1fr; grid-auto-flow: column</code>. Cards fill column-first: top-left → bottom-left → top-right → etc. Scrolls horizontally when more than ~3 columns. On narrow screens, collapses to <code>grid-template-rows: 1fr</code> (single row).</li>
+    <li><strong>"+" card spans both rows</strong> — Tall thin add button at the end of the scroll.</li>
+    <li><strong>Active cards are taller</strong> (they have the Agents box), idle cards are shorter — the 2-row grid handles this naturally since row height adapts to the tallest card.</li>
+  </ul>
+</div>

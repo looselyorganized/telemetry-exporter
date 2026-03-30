@@ -1,0 +1,114 @@
+<h2>Project Card — Stats Panel Options</h2>
+<p class="subtitle">How the Agents/Activity box adapts based on project state</p>
+
+<div class="split">
+  <!-- ACTIVE card -->
+  <div class="mockup">
+    <div class="mockup-header">Active project (agents running)</div>
+    <div class="mockup-body" style="padding:0; font-family:'IBM Plex Mono',monospace; font-size:11px; background:#1e1e1e; color:#E8E2D4;">
+      <div style="padding:16px;">
+        <!-- Header -->
+        <div style="font-size:14px; font-weight:bold; color:#C4BFAF;">telemetry-exporter</div>
+        <div style="display:flex; align-items:center; gap:6px; margin-top:4px;">
+          <span style="width:7px; height:7px; border-radius:50%; background:#4CAF50; box-shadow:0 0 6px #4CAF50;"></span>
+          <span style="font-size:11px; color:#9E9888;">active · 2 agents</span>
+        </div>
+
+        <!-- Stats row -->
+        <div style="display:flex; justify-content:space-between; margin-top:14px;">
+          <div><div style="font-size:9px; color:#9E9888; text-transform:uppercase;">COST</div><div style="font-size:16px; font-weight:bold;">$121.84</div></div>
+          <div><div style="font-size:9px; color:#9E9888; text-transform:uppercase;">TOKENS</div><div style="font-size:16px; font-weight:bold;">213.0M</div></div>
+          <div><div style="font-size:9px; color:#9E9888; text-transform:uppercase;">SESSIONS</div><div style="font-size:16px; font-weight:bold;">976</div></div>
+          <div><div style="font-size:9px; color:#9E9888; text-transform:uppercase;">MSGS</div><div style="font-size:16px; font-weight:bold;">11,565</div></div>
+        </div>
+
+        <!-- Bar chart placeholder -->
+        <div style="display:flex; align-items:flex-end; gap:3px; height:40px; margin-top:12px;">
+          <div style="flex:1;display:flex;flex-direction:column;align-items:center;"><div style="width:100%;height:6px;background:#1e3a1e;border-radius:1px;"></div><span style="font-size:8px;color:#555;margin-top:2px;">21</span></div>
+          <div style="flex:1;display:flex;flex-direction:column;align-items:center;"><div style="width:100%;height:3px;background:#1e3a1e;border-radius:1px;"></div><span style="font-size:8px;color:#555;margin-top:2px;">22</span></div>
+          <div style="flex:1;display:flex;flex-direction:column;align-items:center;"><div style="width:100%;height:10px;background:#1e3a1e;border-radius:1px;"></div><span style="font-size:8px;color:#555;margin-top:2px;">23</span></div>
+          <div style="flex:1;display:flex;flex-direction:column;align-items:center;"><div style="width:100%;height:15px;background:#2a5a2a;border-radius:1px;"></div><span style="font-size:8px;color:#555;margin-top:2px;">24</span></div>
+          <div style="flex:1;display:flex;flex-direction:column;align-items:center;"><div style="width:100%;height:8px;background:#1e3a1e;border-radius:1px;"></div><span style="font-size:8px;color:#555;margin-top:2px;">25</span></div>
+          <div style="flex:1;display:flex;flex-direction:column;align-items:center;"><div style="width:100%;height:20px;background:#2a5a2a;border-radius:1px;"></div><span style="font-size:8px;color:#555;margin-top:2px;">26</span></div>
+          <div style="flex:1;display:flex;flex-direction:column;align-items:center;"><div style="width:100%;height:35px;background:#4CAF50;border-radius:1px;"></div><span style="font-size:8px;color:#9E9888;margin-top:2px;">27</span></div>
+        </div>
+
+        <!-- AGENTS box (active state) -->
+        <div style="background:#141414; border:1px dashed #333; border-radius:4px; padding:10px 12px; margin-top:14px; font-size:10px;">
+          <div style="font-size:9px; color:#9E9888; text-transform:uppercase; letter-spacing:0.5px; font-weight:bold; margin-bottom:8px;">Agents</div>
+          <div style="display:flex; align-items:center; gap:6px; margin-bottom:6px;">
+            <span style="width:6px; height:6px; border-radius:50%; background:#4CAF50;"></span>
+            <span style="color:#C4BFAF;">PID 93783</span>
+            <span style="color:#9E9888;">Opus · 699MB · 2h04m</span>
+            <span style="flex:1;"></span>
+            <span style="color:#ff9800; filter:drop-shadow(0 0 4px rgba(255,152,0,0.6));">👋</span>
+          </div>
+          <div style="margin-left:14px; border-left:1px dashed #333; padding-left:8px; font-size:9px;">
+            <div style="color:#9E9888; margin-bottom:2px;">├ <span style="color:#c49bff;">Explore</span> pipeline <span style="color:#4CAF50;">●</span></div>
+            <div style="color:#9E9888;">└ <span style="color:#c49bff;">Audit</span> Supabase <span style="color:#555;">done</span></div>
+          </div>
+        </div>
+
+        <div style="font-size:8px; color:rgba(158,152,136,0.3); margin-top:10px;">proj_fc236751-369a-4b23-847e-577e06753eee</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- IDLE/DORMANT card -->
+  <div class="mockup">
+    <div class="mockup-header">Idle/dormant project (no agents)</div>
+    <div class="mockup-body" style="padding:0; font-family:'IBM Plex Mono',monospace; font-size:11px; background:#1e1e1e; color:#E8E2D4;">
+      <div style="padding:16px;">
+        <!-- Header -->
+        <div style="font-size:14px; font-weight:bold; color:#C4BFAF;">platform</div>
+        <div style="display:flex; align-items:center; gap:6px; margin-top:4px;">
+          <span style="width:7px; height:7px; border-radius:50%; background:#ff9800; box-shadow:0 0 4px rgba(255,152,0,0.3);"></span>
+          <span style="font-size:11px; color:#9E9888;">idle · 19h ago</span>
+        </div>
+
+        <!-- Stats row -->
+        <div style="display:flex; justify-content:space-between; margin-top:14px;">
+          <div><div style="font-size:9px; color:#9E9888; text-transform:uppercase;">COST</div><div style="font-size:16px; color:#9E9888;">$0.00</div></div>
+          <div><div style="font-size:9px; color:#9E9888; text-transform:uppercase;">TOKENS</div><div style="font-size:16px; color:#9E9888;">0</div></div>
+          <div><div style="font-size:9px; color:#9E9888; text-transform:uppercase;">SESSIONS</div><div style="font-size:16px;">920</div></div>
+          <div><div style="font-size:9px; color:#9E9888; text-transform:uppercase;">MSGS</div><div style="font-size:16px;">18,754</div></div>
+        </div>
+
+        <!-- Bar chart -->
+        <div style="display:flex; align-items:flex-end; gap:3px; height:40px; margin-top:12px;">
+          <div style="flex:1;display:flex;flex-direction:column;align-items:center;"><div style="width:100%;height:15px;background:rgba(76,175,80,0.2);border-radius:1px;"></div><span style="font-size:8px;color:#555;margin-top:2px;">21</span></div>
+          <div style="flex:1;display:flex;flex-direction:column;align-items:center;"><div style="width:100%;height:20px;background:rgba(76,175,80,0.2);border-radius:1px;"></div><span style="font-size:8px;color:#555;margin-top:2px;">22</span></div>
+          <div style="flex:1;display:flex;flex-direction:column;align-items:center;"><div style="width:100%;height:8px;background:rgba(76,175,80,0.2);border-radius:1px;"></div><span style="font-size:8px;color:#555;margin-top:2px;">23</span></div>
+          <div style="flex:1;display:flex;flex-direction:column;align-items:center;"><div style="width:100%;height:0px;border-radius:1px;"></div><span style="font-size:8px;color:#555;margin-top:2px;">24</span></div>
+          <div style="flex:1;display:flex;flex-direction:column;align-items:center;"><div style="width:100%;height:0px;border-radius:1px;"></div><span style="font-size:8px;color:#555;margin-top:2px;">25</span></div>
+          <div style="flex:1;display:flex;flex-direction:column;align-items:center;"><div style="width:100%;height:12px;background:rgba(76,175,80,0.2);border-radius:1px;"></div><span style="font-size:8px;color:#555;margin-top:2px;">26</span></div>
+          <div style="flex:1;display:flex;flex-direction:column;align-items:center;"><div style="width:100%;height:0px;border-radius:1px;"></div><span style="font-size:8px;color:#555;margin-top:2px;">27</span></div>
+        </div>
+
+        <!-- ACTIVITY box (idle/dormant state — replaces empty Agents) -->
+        <div style="background:#141414; border:1px dashed #333; border-radius:4px; padding:10px 12px; margin-top:14px; font-size:10px;">
+          <div style="font-size:9px; color:#9E9888; text-transform:uppercase; letter-spacing:0.5px; font-weight:bold; margin-bottom:8px;">Activity</div>
+          <div style="display:grid; grid-template-columns:1fr auto; gap:2px 12px; line-height:1.6;">
+            <span style="color:#C4BFAF;">🔧 Tool use</span><span style="color:#9E9888; text-align:right;">2,530</span>
+            <span style="color:#C4BFAF;">📖 Read</span><span style="color:#9E9888; text-align:right;">416</span>
+            <span style="color:#C4BFAF;">🔍 Search</span><span style="color:#9E9888; text-align:right;">130</span>
+            <span style="color:#C4BFAF;">🌐 Fetch</span><span style="color:#9E9888; text-align:right;">3</span>
+            <span style="color:#C4BFAF;">🔌 MCP call</span><span style="color:#9E9888; text-align:right;">57</span>
+            <span style="color:#C4BFAF;">⚡ Skill use</span><span style="color:#9E9888; text-align:right;">5</span>
+            <span style="color:#C4BFAF;">🚀 Agent spawn</span><span style="color:#9E9888; text-align:right;">28</span>
+            <span style="color:#C4BFAF;">🛬 Agent finished</span><span style="color:#9E9888; text-align:right;">28</span>
+            <span style="color:#C4BFAF;">🟢 Session start</span><span style="color:#9E9888; text-align:right;">14</span>
+            <span style="color:#C4BFAF;">🔐 Permission</span><span style="color:#9E9888; text-align:right;">63</span>
+            <span style="color:#C4BFAF;">📋 Task</span><span style="color:#9E9888; text-align:right;">17</span>
+            <div style="grid-column:1/-1; border-top:1px dashed #333; margin:4px 0;"></div>
+            <span style="color:#C4BFAF; font-weight:bold;">Total</span><span style="color:#E8E2D4; text-align:right; font-weight:bold;">3,291</span>
+          </div>
+        </div>
+
+        <div style="font-size:8px; color:rgba(158,152,136,0.3); margin-top:10px;">proj_166345da-d821-4b3a-abbc-e3a439925e85</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<p class="subtitle" style="margin-top:16px;">Left: active card shows the Agent tree (as now). Right: idle/dormant card shows the Activity stats breakdown instead of "No active instances".</p>

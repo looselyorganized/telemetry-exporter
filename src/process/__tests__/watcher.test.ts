@@ -14,6 +14,7 @@ const mockGetFacilityState = mock<() => FacilityState>(() => ({
 mock.module("../scanner", () => ({
   ...realScanner,
   getFacilityState: mockGetFacilityState,
+  resolveSessionId: () => null,
 }));
 
 // Import after mocking
@@ -110,6 +111,7 @@ describe("ProcessWatcher", () => {
       type: "instance:closed",
       project: "alpha",
       pid: 1,
+      sessionId: null,
     });
   });
 
@@ -225,7 +227,7 @@ describe("ProcessWatcher", () => {
       setProcesses([]);
       const closeDiff = watcher.tick();
       expect(closeDiff!.events).toEqual([
-        { type: "instance:closed", project: "alpha", pid: 1 },
+        { type: "instance:closed", project: "alpha", pid: 1, sessionId: null },
       ]);
 
       // Reopen same PID — should start fresh

@@ -1,0 +1,140 @@
+<h2>Facility Ops — Command Center Layout</h2>
+<p class="subtitle">Dense grid: everything visible at once, no scrolling</p>
+
+<div class="mockup">
+  <div class="mockup-header">http://looselyorganized.com/ops</div>
+  <div class="mockup-body" style="padding:0; font-family: 'IBM Plex Mono', monospace; font-size: 11px; background: #0a0a0a; color: #e0e0e0;">
+
+    <!-- Health Strip -->
+    <div style="display:flex; gap:16px; padding:8px 16px; background:#111; border-bottom:1px dashed #333; align-items:center;">
+      <span style="color:#50ff90; font-weight:bold;">● ACTIVE</span>
+      <span style="color:#666;">│</span>
+      <span>Supabase <span style="color:#50ffa0;">✓</span></span>
+      <span>OTLP <span style="color:#50ffa0;">✓</span></span>
+      <span>Pipeline <span style="color:#50ffa0;">✓</span></span>
+      <span>Site <span style="color:#50ffa0;">✓</span></span>
+      <span style="color:#666;">│</span>
+      <span style="color:#888;">Outbox: 0 pending</span>
+      <span style="color:#888;">Archive: 38k draining</span>
+      <span style="flex:1;"></span>
+      <span style="color:#666;">Mar 27, 2026 — 09:14 AM</span>
+    </div>
+
+    <!-- Main Grid -->
+    <div style="display:grid; grid-template-columns: 1fr 1fr 1fr 2fr; grid-template-rows: auto 1fr; gap:0; min-height:420px;">
+
+      <!-- Project Cards (3 columns) -->
+      <div style="border-right:1px dashed #333; border-bottom:1px dashed #333; padding:12px;">
+        <div style="color:#50ffa0; font-weight:bold; margin-bottom:8px;">telemetry-exporter</div>
+        <div style="color:#888; font-size:10px; margin-bottom:6px;">active · 2 agents</div>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:4px; font-size:10px;">
+          <div><span style="color:#666;">cost</span><br><span style="color:#e0e0e0; font-size:13px; font-weight:bold;">$14.37</span></div>
+          <div><span style="color:#666;">tokens</span><br><span style="color:#e0e0e0; font-size:13px; font-weight:bold;">22.8M</span></div>
+          <div><span style="color:#666;">sessions</span><br><span style="color:#e0e0e0;">860</span></div>
+          <div><span style="color:#666;">messages</span><br><span style="color:#e0e0e0;">10,149</span></div>
+        </div>
+        <div style="margin-top:8px; height:20px; background:#1a1a1a; border:1px dashed #333; border-radius:2px; display:flex; align-items:center; padding:0 6px;">
+          <div style="height:8px; width:70%; background:linear-gradient(90deg, #1a4a2a, #50ffa0); border-radius:1px;"></div>
+        </div>
+        <div style="color:#555; font-size:9px; margin-top:2px;">7-day token trend</div>
+      </div>
+
+      <div style="border-right:1px dashed #333; border-bottom:1px dashed #333; padding:12px;">
+        <div style="color:#e0e0e0; font-weight:bold; margin-bottom:8px;">platform</div>
+        <div style="color:#555; font-size:10px; margin-bottom:6px;">idle · 19h ago</div>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:4px; font-size:10px;">
+          <div><span style="color:#666;">cost</span><br><span style="color:#e0e0e0; font-size:13px; font-weight:bold;">$0.00</span></div>
+          <div><span style="color:#666;">tokens</span><br><span style="color:#e0e0e0; font-size:13px; font-weight:bold;">0</span></div>
+          <div><span style="color:#666;">sessions</span><br><span style="color:#e0e0e0;">828</span></div>
+          <div><span style="color:#666;">messages</span><br><span style="color:#e0e0e0;">16,943</span></div>
+        </div>
+        <div style="margin-top:8px; height:20px; background:#1a1a1a; border:1px dashed #333; border-radius:2px;"></div>
+        <div style="color:#555; font-size:9px; margin-top:2px;">7-day token trend</div>
+      </div>
+
+      <div style="border-right:1px dashed #333; border-bottom:1px dashed #333; padding:12px;">
+        <div style="color:#e0e0e0; font-weight:bold; margin-bottom:8px;">lorf-agent-zip</div>
+        <div style="color:#555; font-size:10px; margin-bottom:6px;">idle · 2d ago</div>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:4px; font-size:10px;">
+          <div><span style="color:#666;">cost</span><br><span style="color:#e0e0e0; font-size:13px; font-weight:bold;">$0.00</span></div>
+          <div><span style="color:#666;">tokens</span><br><span style="color:#e0e0e0; font-size:13px; font-weight:bold;">0</span></div>
+          <div><span style="color:#666;">sessions</span><br><span style="color:#e0e0e0;">0</span></div>
+          <div><span style="color:#666;">messages</span><br><span style="color:#e0e0e0;">437</span></div>
+        </div>
+        <div style="margin-top:8px; height:20px; background:#1a1a1a; border:1px dashed #333; border-radius:2px;"></div>
+        <div style="color:#555; font-size:9px; margin-top:2px;">7-day token trend</div>
+      </div>
+
+      <!-- Live Activity Feed (right column, spans 2 rows) -->
+      <div style="border-bottom:1px dashed #333; padding:12px; grid-row: 1 / 3; overflow:hidden;">
+        <div style="color:#888; font-weight:bold; margin-bottom:8px; font-size:10px; text-transform:uppercase; letter-spacing:1px;">Live Activity</div>
+        <div style="font-size:10px; line-height:1.8;">
+          <div><span style="color:#555;">09:14:02</span> <span style="color:#50ffa0;">telemetry-exporter</span> 🔧 Bash: Run tests after all fixes</div>
+          <div><span style="color:#555;">09:13:58</span> <span style="color:#50ffa0;">telemetry-exporter</span> 📖 Read shipper.ts:337-357</div>
+          <div><span style="color:#555;">09:13:55</span> <span style="color:#6fa8dc;">lo</span> 🔍 Grep: batchUpsertProjectTelemetry</div>
+          <div><span style="color:#555;">09:13:51</span> <span style="color:#50ffa0;">telemetry-exporter</span> ✏️ Edit shipper.ts — add insert method</div>
+          <div><span style="color:#555;">09:13:44</span> <span style="color:#6fa8dc;">lo</span> 📖 Read processor.ts:460-490</div>
+          <div><span style="color:#555;">09:13:40</span> <span style="color:#50ffa0;">telemetry-exporter</span> 🔧 Bash: sqlite3 outbox status</div>
+          <div><span style="color:#555;">09:13:32</span> <span style="color:#6fa8dc;">lo</span> 🚀 Spawned agent: Explore pipeline</div>
+          <div><span style="color:#555;">09:13:28</span> <span style="color:#50ffa0;">telemetry-exporter</span> 🔧 Bash: tail error log</div>
+          <div><span style="color:#555;">09:13:20</span> <span style="color:#50ffa0;">telemetry-exporter</span> 🔧 Bash: launchctl restart</div>
+          <div><span style="color:#555;">09:12:55</span> <span style="color:#6fa8dc;">lo</span> 📖 Read daemon.ts:1-100</div>
+          <div><span style="color:#555;">09:12:48</span> <span style="color:#50ffa0;">telemetry-exporter</span> 🔍 Grep: cost_lifetime column</div>
+          <div><span style="color:#555;">09:12:40</span> <span style="color:#6fa8dc;">lo</span> 💬 Message to subagent</div>
+          <div><span style="color:#555;">09:12:31</span> <span style="color:#50ffa0;">telemetry-exporter</span> 🔧 Bash: ALTER TABLE</div>
+          <div><span style="color:#555;">09:12:20</span> <span style="color:#e8a87c;">claude-dashboard</span> 🟢 Session started</div>
+          <div style="color:#555; margin-top:8px; text-align:center;">· · ·</div>
+        </div>
+      </div>
+
+      <!-- More project cards (row 2) -->
+      <div style="border-right:1px dashed #333; padding:12px;">
+        <div style="color:#888; font-weight:bold; margin-bottom:8px;">org-root</div>
+        <div style="color:#555; font-size:10px; margin-bottom:6px;">idle · 2h ago</div>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:4px; font-size:10px;">
+          <div><span style="color:#666;">cost</span><br><span style="color:#888;">$0.00</span></div>
+          <div><span style="color:#666;">tokens</span><br><span style="color:#888;">0</span></div>
+          <div><span style="color:#666;">sessions</span><br><span style="color:#888;">3,479</span></div>
+          <div><span style="color:#666;">messages</span><br><span style="color:#888;">23,268</span></div>
+        </div>
+      </div>
+
+      <div style="border-right:1px dashed #333; padding:12px;">
+        <div style="color:#888; font-weight:bold; margin-bottom:8px;">claude-dashboard</div>
+        <div style="color:#555; font-size:10px; margin-bottom:6px;">idle · 2d ago</div>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:4px; font-size:10px;">
+          <div><span style="color:#666;">cost</span><br><span style="color:#888;">$0.00</span></div>
+          <div><span style="color:#666;">tokens</span><br><span style="color:#888;">0</span></div>
+          <div><span style="color:#666;">sessions</span><br><span style="color:#888;">969</span></div>
+          <div><span style="color:#666;">messages</span><br><span style="color:#888;">6,563</span></div>
+        </div>
+      </div>
+
+      <div style="border-right:1px dashed #333; padding:12px;">
+        <div style="color:#888; font-weight:bold; margin-bottom:8px;">agent-context-api</div>
+        <div style="color:#555; font-size:10px; margin-bottom:6px;">idle · 1d ago</div>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:4px; font-size:10px;">
+          <div><span style="color:#666;">cost</span><br><span style="color:#888;">$0.00</span></div>
+          <div><span style="color:#666;">tokens</span><br><span style="color:#888;">0</span></div>
+          <div><span style="color:#666;">sessions</span><br><span style="color:#888;">28</span></div>
+          <div><span style="color:#666;">messages</span><br><span style="color:#888;">178</span></div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Bottom Strip: Facility Summary -->
+    <div style="display:flex; gap:24px; padding:10px 16px; background:#111; border-top:1px dashed #333; font-size:10px; align-items:center;">
+      <div><span style="color:#666;">TODAY</span> <span style="font-weight:bold; color:#e0e0e0; font-size:13px;">$14.37</span> <span style="color:#555;">across 220 requests</span></div>
+      <span style="color:#333;">│</span>
+      <div><span style="color:#666;">LIFETIME</span> <span style="color:#888;">7,874 sessions · 80,661 messages · since Dec 24</span></div>
+      <span style="color:#333;">│</span>
+      <div><span style="color:#e8a87c;">⚠ Budget alert:</span> <span style="color:#888;">telemetry-exporter passed $10 threshold</span></div>
+      <span style="flex:1;"></span>
+      <div style="color:#555;">Opus: 18.5M tok · Haiku: 2.4M tok</span></div>
+    </div>
+
+  </div>
+</div>
+
+<p class="subtitle" style="margin-top:16px;">Project cards (left 60%) show per-project cost, tokens, activity, trend. Live feed (right 40%) streams events in real-time. Health strip at top, facility roll-up at bottom. Everything visible at once.</p>

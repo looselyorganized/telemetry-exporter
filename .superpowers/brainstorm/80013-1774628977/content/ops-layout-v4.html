@@ -1,0 +1,349 @@
+<h2>Facility Ops — V4</h2>
+<p class="subtitle">Left nav, horizontal pagination, scrolling notification bar, refined agent indicators</p>
+
+<div class="mockup">
+  <div class="mockup-header">http://looselyorganized.com/ops</div>
+  <div class="mockup-body" style="padding:0; font-family: 'IBM Plex Mono', monospace; font-size: 11px; background: #141414; color: #E8E2D4; display:flex; min-height:540px;">
+
+    <!-- LEFT NAV -->
+    <div style="width:48px; background:#1a1a1a; border-right:1px dashed #333; display:flex; flex-direction:column; align-items:center; padding-top:12px; gap:20px; flex-shrink:0;">
+      <!-- LORF logo -->
+      <div style="width:28px; height:28px; border:1px dashed #333; border-radius:4px; display:flex; align-items:center; justify-content:center; font-size:8px; font-weight:bold; color:#E8E2D4; cursor:pointer;" title="LORF">LO</div>
+      <!-- Nav items -->
+      <div style="width:28px; height:28px; background:#E8E2D4; border-radius:4px; display:flex; align-items:center; justify-content:center; cursor:pointer;" title="Command">
+        <span style="font-size:14px; filter:invert(1);">⊞</span>
+      </div>
+      <div style="width:28px; height:28px; border:1px dashed #333; border-radius:4px; display:flex; align-items:center; justify-content:center; cursor:pointer; color:#9E9888;" title="Activity Log">
+        <span style="font-size:13px;">☰</span>
+      </div>
+      <div style="width:28px; height:28px; border:1px dashed #333; border-radius:4px; display:flex; align-items:center; justify-content:center; cursor:pointer; color:#9E9888;" title="Settings">
+        <span style="font-size:13px;">⚙</span>
+      </div>
+      <!-- Spacer -->
+      <div style="flex:1;"></div>
+      <!-- Status dot at bottom -->
+      <div style="margin-bottom:12px;">
+        <span style="color:#4CAF50; font-size:10px;">●</span>
+      </div>
+    </div>
+
+    <!-- MAIN AREA -->
+    <div style="flex:1; display:flex; flex-direction:column; overflow:hidden;">
+
+      <!-- HEADER BAR -->
+      <div style="display:flex; gap:0; background:#1a1a1a; border-bottom:1px dashed #333; align-items:stretch; font-size:10px; flex-shrink:0;">
+
+        <!-- Time Range -->
+        <div style="display:flex; align-items:center; gap:2px; padding:10px 14px; border-right:1px dashed #333;">
+          <span style="background:#E8E2D4; color:#141414; padding:2px 8px; font-size:9px; font-weight:bold; border-radius:2px;">TODAY</span>
+          <span style="color:#9E9888; padding:2px 8px; font-size:9px; cursor:pointer;">7D</span>
+          <span style="color:#9E9888; padding:2px 8px; font-size:9px; cursor:pointer;">30D</span>
+          <span style="color:#9E9888; padding:2px 8px; font-size:9px; cursor:pointer;">ALL</span>
+        </div>
+
+        <!-- Facility Stats -->
+        <div style="display:flex; align-items:center; gap:16px; padding:10px 16px; border-right:1px dashed #333;">
+          <div><span style="color:#9E9888; font-size:8px; text-transform:uppercase;">Cost</span><br><span style="font-weight:bold; font-size:14px;">$14.37</span></div>
+          <div><span style="color:#9E9888; font-size:8px; text-transform:uppercase;">Tokens</span><br><span style="font-weight:bold; font-size:14px;">65.1M</span></div>
+          <div><span style="color:#9E9888; font-size:8px; text-transform:uppercase;">Sessions</span><br><span style="font-size:12px;">5</span></div>
+          <div><span style="color:#9E9888; font-size:8px; text-transform:uppercase;">Messages</span><br><span style="font-size:12px;">29</span></div>
+        </div>
+
+        <!-- Model Breakdown -->
+        <div style="display:flex; align-items:center; gap:12px; padding:10px 16px; border-right:1px dashed #333;">
+          <div><span style="color:#c49bff; font-size:9px;">● Opus 4.6</span> <span style="font-size:11px;">62.7M</span></div>
+          <div><span style="color:#7cc8ff; font-size:9px;">● Haiku 4.5</span> <span style="font-size:11px;">2.4M</span></div>
+        </div>
+
+        <!-- Spacer -->
+        <div style="flex:1;"></div>
+
+        <!-- Notification bell -->
+        <div style="display:flex; align-items:center; padding:10px 16px; cursor:pointer; position:relative;">
+          <span style="font-size:14px; color:#9E9888;">🔔</span>
+          <span style="position:absolute; top:6px; right:12px; background:#EF5350; color:#141414; font-size:7px; font-weight:bold; width:12px; height:12px; border-radius:6px; display:flex; align-items:center; justify-content:center;">1</span>
+        </div>
+
+        <!-- Date -->
+        <div style="display:flex; align-items:center; padding:10px 16px; color:#9E9888; font-size:9px; border-left:1px dashed #333;">
+          Mar 27, 2026
+        </div>
+      </div>
+
+      <!-- SCROLLING NOTIFICATION BAR -->
+      <div style="background:#1e1408; border-bottom:1px dashed #333; padding:5px 16px; font-size:9px; display:flex; align-items:center; gap:8px; flex-shrink:0; overflow:hidden;">
+        <span style="color:#ff9800; font-size:10px; flex-shrink:0;">⚠</span>
+        <div style="overflow:hidden; white-space:nowrap; flex:1;">
+          <span style="color:#C4BFAF; display:inline-block; animation: scroll 20s linear infinite;">
+            telemetry-exporter passed $10 budget threshold &nbsp;&nbsp;·&nbsp;&nbsp; Archive backlog: 38k rows draining &nbsp;&nbsp;·&nbsp;&nbsp; telemetry-exporter passed $10 budget threshold &nbsp;&nbsp;·&nbsp;&nbsp; Archive backlog: 38k rows draining
+          </span>
+        </div>
+        <span style="color:#555; cursor:pointer; flex-shrink:0; font-size:8px;">1 of 2 ›</span>
+      </div>
+
+      <!-- PROJECT CARDS: Horizontal scroll -->
+      <div style="flex:1; overflow-x:auto; overflow-y:hidden; padding:16px; display:flex; gap:14px; align-items:flex-start;">
+
+        <!-- PROJECT CARD: telemetry-exporter (ACTIVE, WAITING) -->
+        <div style="min-width:320px; max-width:320px; background:#1a1a1a; border:1px dashed #333; border-radius:6px; padding:16px; flex-shrink:0; position:relative; box-shadow: 0 0 12px rgba(255, 152, 0, 0.15);">
+          <!-- Orange glow border for waiting -->
+          <div style="position:absolute; top:-1px; left:-1px; right:-1px; bottom:-1px; border:1px solid rgba(255, 152, 0, 0.4); border-radius:6px; pointer-events:none;"></div>
+
+          <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:10px;">
+            <div>
+              <span style="color:#4CAF50; font-weight:bold; font-size:13px;">telemetry-exporter</span>
+              <div style="color:#4CAF50; font-size:9px; margin-top:2px;">active · 2 agents</div>
+            </div>
+            <span style="color:#9E9888; font-size:8px; text-transform:uppercase; letter-spacing:0.5px;">Today</span>
+          </div>
+
+          <!-- Stats -->
+          <div style="display:flex; gap:16px; margin-bottom:12px; font-size:10px;">
+            <div><span style="color:#9E9888; font-size:8px;">COST</span><br><span style="font-size:15px; font-weight:bold;">$14.37</span></div>
+            <div><span style="color:#9E9888; font-size:8px;">TOKENS</span><br><span style="font-size:15px; font-weight:bold;">62.7M</span></div>
+            <div><span style="color:#9E9888; font-size:8px;">SESSIONS</span><br><span>3</span></div>
+            <div><span style="color:#9E9888; font-size:8px;">MSGS</span><br><span>22</span></div>
+          </div>
+
+          <!-- 7-day bar chart -->
+          <div style="display:flex; align-items:flex-end; gap:3px; height:28px; margin-bottom:12px;">
+            <div style="flex:1; display:flex; flex-direction:column; align-items:center;">
+              <div style="width:100%; height:4px; background:#1e3a1e; border-radius:1px;"></div>
+              <span style="font-size:7px; color:#555; margin-top:2px;">21</span>
+            </div>
+            <div style="flex:1; display:flex; flex-direction:column; align-items:center;">
+              <div style="width:100%; height:2px; background:#1e3a1e; border-radius:1px;"></div>
+              <span style="font-size:7px; color:#555; margin-top:2px;">22</span>
+            </div>
+            <div style="flex:1; display:flex; flex-direction:column; align-items:center;">
+              <div style="width:100%; height:6px; background:#1e3a1e; border-radius:1px;"></div>
+              <span style="font-size:7px; color:#555; margin-top:2px;">23</span>
+            </div>
+            <div style="flex:1; display:flex; flex-direction:column; align-items:center;">
+              <div style="width:100%; height:8px; background:#1e3a1e; border-radius:1px;"></div>
+              <span style="font-size:7px; color:#555; margin-top:2px;">24</span>
+            </div>
+            <div style="flex:1; display:flex; flex-direction:column; align-items:center;">
+              <div style="width:100%; height:5px; background:#1e3a1e; border-radius:1px;"></div>
+              <span style="font-size:7px; color:#555; margin-top:2px;">25</span>
+            </div>
+            <div style="flex:1; display:flex; flex-direction:column; align-items:center;">
+              <div style="width:100%; height:10px; background:#2a5a2a; border-radius:1px;"></div>
+              <span style="font-size:7px; color:#555; margin-top:2px;">26</span>
+            </div>
+            <div style="flex:1; display:flex; flex-direction:column; align-items:center;">
+              <div style="width:100%; height:24px; background:#4CAF50; border-radius:1px;"></div>
+              <span style="font-size:7px; color:#9E9888; margin-top:2px;">27</span>
+            </div>
+          </div>
+
+          <!-- Agents box -->
+          <div style="background:#141414; border:1px dashed #333; border-radius:3px; padding:10px; font-size:9px;">
+            <div style="color:#9E9888; font-size:8px; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:6px;">Agents</div>
+            <div style="display:flex; align-items:center; gap:6px; margin-bottom:6px;">
+              <span style="color:#4CAF50;">●</span>
+              <span style="color:#C4BFAF;">PID 93783</span>
+              <span style="color:#9E9888;">Opus 4.6 · 699MB · 2h04m</span>
+              <span style="flex:1;"></span>
+              <span style="font-size:12px; cursor:help;" title="Waiting for your input">👋</span>
+            </div>
+            <div style="margin-left:16px; border-left:1px dashed #333; padding-left:8px;">
+              <div style="color:#9E9888; margin-bottom:3px;">├ <span style="color:#c49bff;">Explore</span> pipeline <span style="color:#4CAF50;">●</span></div>
+              <div style="color:#9E9888; margin-bottom:3px;">├ <span style="color:#c49bff;">Audit</span> Supabase schema <span style="color:#9E9888;">done</span></div>
+              <div style="color:#9E9888;">└ <span style="color:#c49bff;">Check</span> 24h data loss <span style="color:#9E9888;">done</span></div>
+            </div>
+            <div style="margin-top:8px; padding-top:6px; border-top:1px dashed #333; display:flex; align-items:center; gap:6px;">
+              <span style="color:#ff9800;">●</span>
+              <span style="color:#C4BFAF;">PID 91608</span>
+              <span style="color:#9E9888;">Opus 4.6 · 273MB · 2h05m</span>
+              <span style="flex:1;"></span>
+              <span style="font-size:12px; cursor:help;" title="Needs permission">🔐</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- PROJECT CARD: lo (ACTIVE) -->
+        <div style="min-width:320px; max-width:320px; background:#1a1a1a; border:1px dashed #333; border-radius:6px; padding:16px; flex-shrink:0;">
+          <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:10px;">
+            <div>
+              <span style="color:#4CAF50; font-weight:bold; font-size:13px;">lo</span>
+              <div style="color:#4CAF50; font-size:9px; margin-top:2px;">active · 1 agent</div>
+            </div>
+            <span style="color:#9E9888; font-size:8px; text-transform:uppercase;">Today</span>
+          </div>
+          <div style="display:flex; gap:16px; margin-bottom:12px; font-size:10px;">
+            <div><span style="color:#9E9888; font-size:8px;">COST</span><br><span style="font-size:15px; font-weight:bold;">$2.41</span></div>
+            <div><span style="color:#9E9888; font-size:8px;">TOKENS</span><br><span style="font-size:15px; font-weight:bold;">2.4M</span></div>
+            <div><span style="color:#9E9888; font-size:8px;">SESSIONS</span><br><span>2</span></div>
+            <div><span style="color:#9E9888; font-size:8px;">MSGS</span><br><span>7</span></div>
+          </div>
+          <div style="display:flex; align-items:flex-end; gap:3px; height:28px; margin-bottom:12px;">
+            <div style="flex:1; display:flex; flex-direction:column; align-items:center;">
+              <div style="width:100%; height:6px; background:#1e3a1e; border-radius:1px;"></div>
+              <span style="font-size:7px; color:#555; margin-top:2px;">21</span>
+            </div>
+            <div style="flex:1; display:flex; flex-direction:column; align-items:center;">
+              <div style="width:100%; height:3px; background:#1e3a1e; border-radius:1px;"></div>
+              <span style="font-size:7px; color:#555; margin-top:2px;">22</span>
+            </div>
+            <div style="flex:1; display:flex; flex-direction:column; align-items:center;">
+              <div style="width:100%; height:0px; background:#1e3a1e; border-radius:1px;"></div>
+              <span style="font-size:7px; color:#555; margin-top:2px;">23</span>
+            </div>
+            <div style="flex:1; display:flex; flex-direction:column; align-items:center;">
+              <div style="width:100%; height:2px; background:#1e3a1e; border-radius:1px;"></div>
+              <span style="font-size:7px; color:#555; margin-top:2px;">24</span>
+            </div>
+            <div style="flex:1; display:flex; flex-direction:column; align-items:center;">
+              <div style="width:100%; height:8px; background:#1e3a1e; border-radius:1px;"></div>
+              <span style="font-size:7px; color:#555; margin-top:2px;">25</span>
+            </div>
+            <div style="flex:1; display:flex; flex-direction:column; align-items:center;">
+              <div style="width:100%; height:12px; background:#2a5a2a; border-radius:1px;"></div>
+              <span style="font-size:7px; color:#555; margin-top:2px;">26</span>
+            </div>
+            <div style="flex:1; display:flex; flex-direction:column; align-items:center;">
+              <div style="width:100%; height:10px; background:#4CAF50; border-radius:1px;"></div>
+              <span style="font-size:7px; color:#9E9888; margin-top:2px;">27</span>
+            </div>
+          </div>
+          <div style="background:#141414; border:1px dashed #333; border-radius:3px; padding:10px; font-size:9px;">
+            <div style="color:#9E9888; font-size:8px; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:6px;">Agents</div>
+            <div style="display:flex; align-items:center; gap:6px;">
+              <span style="color:#ff9800;">●</span>
+              <span style="color:#C4BFAF;">PID 91608</span>
+              <span style="color:#9E9888;">Opus 4.6 · 273MB · 2h05m · 0.7% CPU</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- PROJECT CARD: platform (IDLE) -->
+        <div style="min-width:320px; max-width:320px; background:#1a1a1a; border:1px dashed #333; border-radius:6px; padding:16px; flex-shrink:0; opacity:0.7;">
+          <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:10px;">
+            <div>
+              <span style="color:#C4BFAF; font-weight:bold; font-size:13px;">platform</span>
+              <div style="color:#9E9888; font-size:9px; margin-top:2px;">idle · 19h ago</div>
+            </div>
+            <span style="color:#9E9888; font-size:8px; text-transform:uppercase;">Today</span>
+          </div>
+          <div style="display:flex; gap:16px; margin-bottom:12px; font-size:10px;">
+            <div><span style="color:#9E9888; font-size:8px;">COST</span><br><span style="color:#9E9888;">$0.00</span></div>
+            <div><span style="color:#9E9888; font-size:8px;">TOKENS</span><br><span style="color:#9E9888;">0</span></div>
+            <div><span style="color:#9E9888; font-size:8px;">SESSIONS</span><br><span style="color:#C4BFAF;">828</span></div>
+            <div><span style="color:#9E9888; font-size:8px;">MSGS</span><br><span style="color:#C4BFAF;">16,943</span></div>
+          </div>
+          <div style="display:flex; align-items:flex-end; gap:3px; height:28px;">
+            <div style="flex:1; display:flex; flex-direction:column; align-items:center;">
+              <div style="width:100%; height:12px; background:#282828; border-radius:1px;"></div>
+              <span style="font-size:7px; color:#555; margin-top:2px;">21</span>
+            </div>
+            <div style="flex:1; display:flex; flex-direction:column; align-items:center;">
+              <div style="width:100%; height:8px; background:#282828; border-radius:1px;"></div>
+              <span style="font-size:7px; color:#555; margin-top:2px;">22</span>
+            </div>
+            <div style="flex:1; display:flex; flex-direction:column; align-items:center;">
+              <div style="width:100%; height:3px; background:#282828; border-radius:1px;"></div>
+              <span style="font-size:7px; color:#555; margin-top:2px;">23</span>
+            </div>
+            <div style="flex:1; display:flex; flex-direction:column; align-items:center;">
+              <div style="width:100%; height:15px; background:#282828; border-radius:1px;"></div>
+              <span style="font-size:7px; color:#555; margin-top:2px;">24</span>
+            </div>
+            <div style="flex:1; display:flex; flex-direction:column; align-items:center;">
+              <div style="width:100%; height:6px; background:#282828; border-radius:1px;"></div>
+              <span style="font-size:7px; color:#555; margin-top:2px;">25</span>
+            </div>
+            <div style="flex:1; display:flex; flex-direction:column; align-items:center;">
+              <div style="width:100%; height:10px; background:#282828; border-radius:1px;"></div>
+              <span style="font-size:7px; color:#555; margin-top:2px;">26</span>
+            </div>
+            <div style="flex:1; display:flex; flex-direction:column; align-items:center;">
+              <div style="width:100%; height:0px; border-radius:1px;"></div>
+              <span style="font-size:7px; color:#555; margin-top:2px;">27</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- PROJECT CARD: lorf-agent-zip (IDLE) -->
+        <div style="min-width:320px; max-width:320px; background:#1a1a1a; border:1px dashed #333; border-radius:6px; padding:16px; flex-shrink:0; opacity:0.7;">
+          <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:10px;">
+            <div>
+              <span style="color:#C4BFAF; font-weight:bold; font-size:13px;">lorf-agent-zip</span>
+              <div style="color:#9E9888; font-size:9px; margin-top:2px;">idle · 2d ago</div>
+            </div>
+            <span style="color:#9E9888; font-size:8px; text-transform:uppercase;">Today</span>
+          </div>
+          <div style="display:flex; gap:16px; font-size:10px;">
+            <div><span style="color:#9E9888; font-size:8px;">COST</span><br><span style="color:#9E9888;">$0.00</span></div>
+            <div><span style="color:#9E9888; font-size:8px;">TOKENS</span><br><span style="color:#9E9888;">0</span></div>
+            <div><span style="color:#9E9888; font-size:8px;">SESSIONS</span><br><span style="color:#C4BFAF;">0</span></div>
+            <div><span style="color:#9E9888; font-size:8px;">MSGS</span><br><span style="color:#C4BFAF;">437</span></div>
+          </div>
+        </div>
+
+        <!-- PROJECT CARD: org-root (IDLE, partially visible = pagination hint) -->
+        <div style="min-width:320px; max-width:320px; background:#1a1a1a; border:1px dashed #333; border-radius:6px; padding:16px; flex-shrink:0; opacity:0.7;">
+          <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:10px;">
+            <div>
+              <span style="color:#C4BFAF; font-weight:bold; font-size:13px;">org-root</span>
+              <div style="color:#9E9888; font-size:9px; margin-top:2px;">idle · 2h ago</div>
+            </div>
+            <span style="color:#9E9888; font-size:8px; text-transform:uppercase;">Today</span>
+          </div>
+          <div style="display:flex; gap:16px; font-size:10px;">
+            <div><span style="color:#9E9888; font-size:8px;">COST</span><br><span style="color:#9E9888;">$0.00</span></div>
+            <div><span style="color:#9E9888; font-size:8px;">TOKENS</span><br><span style="color:#9E9888;">0</span></div>
+            <div><span style="color:#9E9888; font-size:8px;">SESSIONS</span><br><span style="color:#C4BFAF;">3,479</span></div>
+            <div><span style="color:#9E9888; font-size:8px;">MSGS</span><br><span style="color:#C4BFAF;">23,268</span></div>
+          </div>
+        </div>
+
+        <!-- ADD card -->
+        <div style="min-width:120px; max-width:120px; background:transparent; border:1px dashed #333; border-radius:6px; padding:16px; flex-shrink:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:8px; cursor:pointer; min-height:200px;">
+          <span style="color:#333; font-size:24px;">+</span>
+          <span style="color:#555; font-size:9px; text-align:center;">Add<br>project</span>
+        </div>
+
+      </div>
+
+      <!-- HEALTH STRIP -->
+      <div style="display:flex; gap:16px; padding:8px 16px; background:#1a1a1a; border-top:1px dashed #333; align-items:center; font-size:10px; flex-shrink:0;">
+        <span style="color:#4CAF50; font-weight:bold; text-transform:uppercase; letter-spacing:0.5px;">● Operational</span>
+        <span style="color:#333;">│</span>
+        <span>Supabase <span style="color:#4CAF50;">✓</span></span>
+        <span>OTLP <span style="color:#4CAF50;">✓</span></span>
+        <span>Pipeline <span style="color:#4CAF50;">✓</span></span>
+        <span>Site <span style="color:#4CAF50;">✓</span></span>
+        <span style="color:#333;">│</span>
+        <span style="color:#9E9888;">972MB RAM · 2 instances</span>
+        <span style="color:#333;">│</span>
+        <span style="color:#9E9888;">Outbox: 0</span>
+        <span style="color:#9E9888;">Archive: 38k draining</span>
+        <span style="flex:1;"></span>
+        <span style="color:#9E9888;">Mar 27, 2026 — 10:13 AM</span>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<style>
+  @keyframes scroll {
+    0% { transform: translateX(0); }
+    100% { transform: translateX(-50%); }
+  }
+</style>
+
+<div style="margin-top:20px; padding:16px; border:1px dashed #555; border-radius:4px; font-size:13px; line-height:1.8;">
+  <h3 style="margin-top:0;">V4 Changes</h3>
+  <ul style="margin:0; padding-left:20px;">
+    <li><strong>Left nav rail</strong> — Icon buttons: LO logo, Command (active), Activity Log, Settings. Green status dot at bottom.</li>
+    <li><strong>Horizontal scrolling project cards</strong> — Cards are fixed-width (320px), scroll horizontally. Active cards are bright, idle cards are dimmed. The partial visibility of the next card hints at more content.</li>
+    <li><strong>"+" card at the end</strong> — Add/remove projects. Opens a pin/unpin panel.</li>
+    <li><strong>Scrolling notification ticker</strong> — Persistent bar below header that scrolls through unresolved notifications. Shows "1 of 2 ›" for paging. Warm amber background for attention without alarm.</li>
+    <li><strong>Renamed "Instances" → "Agents"</strong> in project cards</li>
+    <li><strong>👋 and 🔐 icons inline</strong> — Waiting/permission indicators sit next to the agent PID line inside the Agents box. The card also gets an orange glow border for at-a-glance visibility.</li>
+    <li><strong>No cache ratio</strong> in model bar — cleaner</li>
+    <li><strong>Idle cards dimmed</strong> to 0.7 opacity — visual priority for active work</li>
+  </ul>
+</div>

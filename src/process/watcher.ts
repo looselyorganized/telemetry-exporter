@@ -11,7 +11,7 @@
  * going active only needs the window to cross threshold plus 3 ticks.
  */
 
-import { getFacilityState, clearPidSession } from "./scanner";
+import { getFacilityState, clearPidSession, resolveSessionId } from "./scanner";
 
 /** How many recent ticks to consider (at 250ms each, 40 = 10 seconds). */
 const WINDOW_SIZE = 40;
@@ -30,6 +30,7 @@ export interface ProcessEvent {
   type: ProcessEventType;
   project: string;
   pid: number;
+  sessionId?: string | null;
 }
 
 export interface ProjectAgentState {
@@ -144,10 +145,11 @@ export class ProcessWatcher {
       }
     }
 
-    // Detect closed PIDs
+    // Detect closed PIDs — capture sessionId BEFORE clearing cache
     for (const [pid, prev] of this.previous) {
       if (!current.has(pid)) {
-        events.push({ type: "instance:closed", project: prev.projId, pid });
+        const sessionId = resolveSessionId(pid); // read from cache before clearing
+        events.push({ type: "instance:closed", project: prev.projId, pid, sessionId });
         this.activityWindow.delete(pid);
         this.reportedActive.delete(pid);
         this.confirmationCount.delete(pid);

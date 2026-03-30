@@ -165,7 +165,6 @@ export class Processor {
 
     this.db.transaction(() => {
       // 1. Ship raw per-request data + accumulate into daily rollups
-      const batchCostByProject = new Map<string, number>();
 
       for (const req of batch.apiRequests) {
         const date = req.timestamp.substring(0, 10);
@@ -195,11 +194,6 @@ export class Processor {
         rollup.tokens[req.model].cache_write += req.cacheWriteTokens;
 
         rollup.cost[req.model] = (rollup.cost[req.model] ?? 0) + req.costUsd;
-
-        // Track today's cost for budget alerts
-        if (date === today) {
-          batchCostByProject.set(req.projId, (batchCostByProject.get(req.projId) ?? 0) + req.costUsd);
-        }
       }
 
       // 2. Accumulate tool_result counts into daily rollups (not individual events — events.log covers that)
@@ -236,16 +230,20 @@ export class Processor {
         });
       }
 
-      // 5. Budget threshold alerts
-      for (const [projId, todayCost] of batchCostByProject) {
+      // 5. Budget threshold alerts — use cumulative rollup cost (not per-batch)
+      const affectedProjects = new Set(batch.apiRequests.map(r => r.projId));
+      for (const projId of affectedProjects) {
+        const rollup = this.pendingRollups.get(`${projId}\0${today}`);
+        if (!rollup) continue;
+        const dailyCost = Object.values(rollup.cost).reduce((a, b) => a + b, 0);
         for (const threshold of Processor.BUDGET_THRESHOLDS) {
           const alertKey = `${projId}\0${today}\0${threshold}`;
-          if (todayCost >= threshold && !this.firedAlerts.has(alertKey)) {
+          if (dailyCost >= threshold && !this.firedAlerts.has(alertKey)) {
             enqueue("alerts", {
               project_id: projId,
               alert_type: "budget_threshold",
               threshold_usd: threshold,
-              current_usd: Math.round(todayCost * 100) / 100,
+              current_usd: Math.round(dailyCost * 100) / 100,
               date: today,
             });
             this.firedAlerts.add(alertKey);

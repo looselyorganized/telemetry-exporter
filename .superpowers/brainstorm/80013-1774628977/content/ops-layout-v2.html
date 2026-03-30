@@ -1,0 +1,231 @@
+<h2>Facility Ops — V2</h2>
+<p class="subtitle">Addressing all critiques: swapped bars, wider feed, StockTaper dark mode, time labels, mini bar charts</p>
+
+<div class="mockup">
+  <div class="mockup-header">http://looselyorganized.com/ops</div>
+  <div class="mockup-body" style="padding:0; font-family: 'IBM Plex Mono', monospace; font-size: 11px; background: #141414; color: #E8E2D4;">
+
+    <!-- TOP: Facility Summary Bar (was bottom) -->
+    <div style="display:flex; gap:16px; padding:10px 16px; background:#1a1a1a; border-bottom:1px dashed #333; align-items:center;">
+      <!-- LORF Logo + Status -->
+      <div style="display:flex; align-items:center; gap:8px;">
+        <span style="font-weight:bold; color:#E8E2D4; font-size:13px;">LORF</span>
+        <span style="color:#4CAF50; font-size:16px;">●</span>
+      </div>
+      <span style="color:#333;">│</span>
+      <div><span style="color:#9E9888;">TODAY</span> <span style="font-weight:bold; color:#E8E2D4; font-size:14px;">$14.37</span> <span style="color:#9E9888;">· 220 requests</span></div>
+      <span style="color:#333;">│</span>
+      <div><span style="color:#9E9888;">LIFETIME</span> <span style="color:#C4BFAF;">7,874 sessions · 80,661 messages · since Dec 24</span></div>
+      <span style="color:#333;">│</span>
+      <div><span style="color:#EF5350;">⚠</span> <span style="color:#C4BFAF;">telemetry-exporter passed $10</span></div>
+      <span style="flex:1;"></span>
+      <div style="color:#9E9888; font-size:10px;">Mar 27, 2026 — 09:14 AM</div>
+    </div>
+
+    <!-- Main Grid: 50/50 split for wider activity feed -->
+    <div style="display:grid; grid-template-columns: 1fr 1fr; gap:0; min-height:460px;">
+
+      <!-- LEFT: Project Cards -->
+      <div style="border-right:1px dashed #333; overflow-y:auto;">
+
+        <!-- Project Card: telemetry-exporter (ACTIVE) -->
+        <div style="border-bottom:1px dashed #333; padding:14px 16px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+            <div>
+              <span style="color:#4CAF50; font-weight:bold;">telemetry-exporter</span>
+              <span style="color:#4CAF50; font-size:9px; margin-left:6px;">● 2 agents</span>
+            </div>
+            <span style="color:#9E9888; font-size:9px; text-transform:uppercase; letter-spacing:0.5px;">Today</span>
+          </div>
+          <div style="display:flex; gap:20px; margin-bottom:10px;">
+            <div><span style="color:#9E9888; font-size:9px;">COST</span><br><span style="font-size:15px; font-weight:bold;">$14.37</span></div>
+            <div><span style="color:#9E9888; font-size:9px;">TOKENS</span><br><span style="font-size:15px; font-weight:bold;">22.8M</span></div>
+            <div><span style="color:#9E9888; font-size:9px;">SESSIONS</span><br><span style="color:#C4BFAF;">860</span></div>
+            <div><span style="color:#9E9888; font-size:9px;">MESSAGES</span><br><span style="color:#C4BFAF;">10,149</span></div>
+          </div>
+          <!-- 7-day mini bar chart -->
+          <div style="display:flex; align-items:flex-end; gap:3px; height:24px;">
+            <div style="flex:1; display:flex; flex-direction:column; align-items:center;">
+              <div style="width:100%; height:4px; background:#1e3a1e; border-radius:1px;"></div>
+              <span style="font-size:7px; color:#555; margin-top:2px;">21</span>
+            </div>
+            <div style="flex:1; display:flex; flex-direction:column; align-items:center;">
+              <div style="width:100%; height:2px; background:#1e3a1e; border-radius:1px;"></div>
+              <span style="font-size:7px; color:#555; margin-top:2px;">22</span>
+            </div>
+            <div style="flex:1; display:flex; flex-direction:column; align-items:center;">
+              <div style="width:100%; height:6px; background:#1e3a1e; border-radius:1px;"></div>
+              <span style="font-size:7px; color:#555; margin-top:2px;">23</span>
+            </div>
+            <div style="flex:1; display:flex; flex-direction:column; align-items:center;">
+              <div style="width:100%; height:8px; background:#1e3a1e; border-radius:1px;"></div>
+              <span style="font-size:7px; color:#555; margin-top:2px;">24</span>
+            </div>
+            <div style="flex:1; display:flex; flex-direction:column; align-items:center;">
+              <div style="width:100%; height:5px; background:#1e3a1e; border-radius:1px;"></div>
+              <span style="font-size:7px; color:#555; margin-top:2px;">25</span>
+            </div>
+            <div style="flex:1; display:flex; flex-direction:column; align-items:center;">
+              <div style="width:100%; height:10px; background:#2a5a2a; border-radius:1px;"></div>
+              <span style="font-size:7px; color:#555; margin-top:2px;">26</span>
+            </div>
+            <div style="flex:1; display:flex; flex-direction:column; align-items:center;">
+              <div style="width:100%; height:20px; background:#4CAF50; border-radius:1px;"></div>
+              <span style="font-size:7px; color:#9E9888; margin-top:2px;">27</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Project Card: platform (IDLE) -->
+        <div style="border-bottom:1px dashed #333; padding:14px 16px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+            <div>
+              <span style="color:#C4BFAF; font-weight:bold;">platform</span>
+              <span style="color:#9E9888; font-size:9px; margin-left:6px;">idle · 19h ago</span>
+            </div>
+            <span style="color:#9E9888; font-size:9px; text-transform:uppercase; letter-spacing:0.5px;">Today</span>
+          </div>
+          <div style="display:flex; gap:20px; margin-bottom:10px;">
+            <div><span style="color:#9E9888; font-size:9px;">COST</span><br><span style="color:#9E9888;">$0.00</span></div>
+            <div><span style="color:#9E9888; font-size:9px;">TOKENS</span><br><span style="color:#9E9888;">0</span></div>
+            <div><span style="color:#9E9888; font-size:9px;">SESSIONS</span><br><span style="color:#C4BFAF;">828</span></div>
+            <div><span style="color:#9E9888; font-size:9px;">MESSAGES</span><br><span style="color:#C4BFAF;">16,943</span></div>
+          </div>
+          <div style="display:flex; align-items:flex-end; gap:3px; height:24px;">
+            <div style="flex:1; display:flex; flex-direction:column; align-items:center;">
+              <div style="width:100%; height:12px; background:#333; border-radius:1px;"></div>
+              <span style="font-size:7px; color:#555; margin-top:2px;">21</span>
+            </div>
+            <div style="flex:1; display:flex; flex-direction:column; align-items:center;">
+              <div style="width:100%; height:8px; background:#333; border-radius:1px;"></div>
+              <span style="font-size:7px; color:#555; margin-top:2px;">22</span>
+            </div>
+            <div style="flex:1; display:flex; flex-direction:column; align-items:center;">
+              <div style="width:100%; height:3px; background:#333; border-radius:1px;"></div>
+              <span style="font-size:7px; color:#555; margin-top:2px;">23</span>
+            </div>
+            <div style="flex:1; display:flex; flex-direction:column; align-items:center;">
+              <div style="width:100%; height:15px; background:#333; border-radius:1px;"></div>
+              <span style="font-size:7px; color:#555; margin-top:2px;">24</span>
+            </div>
+            <div style="flex:1; display:flex; flex-direction:column; align-items:center;">
+              <div style="width:100%; height:6px; background:#333; border-radius:1px;"></div>
+              <span style="font-size:7px; color:#555; margin-top:2px;">25</span>
+            </div>
+            <div style="flex:1; display:flex; flex-direction:column; align-items:center;">
+              <div style="width:100%; height:10px; background:#333; border-radius:1px;"></div>
+              <span style="font-size:7px; color:#555; margin-top:2px;">26</span>
+            </div>
+            <div style="flex:1; display:flex; flex-direction:column; align-items:center;">
+              <div style="width:100%; height:0px; background:#333; border-radius:1px;"></div>
+              <span style="font-size:7px; color:#555; margin-top:2px;">27</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Project Card: lorf-agent-zip (IDLE) -->
+        <div style="border-bottom:1px dashed #333; padding:14px 16px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+            <div>
+              <span style="color:#C4BFAF; font-weight:bold;">lorf-agent-zip</span>
+              <span style="color:#9E9888; font-size:9px; margin-left:6px;">idle · 2d ago</span>
+            </div>
+            <span style="color:#9E9888; font-size:9px; text-transform:uppercase; letter-spacing:0.5px;">Today</span>
+          </div>
+          <div style="display:flex; gap:20px;">
+            <div><span style="color:#9E9888; font-size:9px;">COST</span><br><span style="color:#9E9888;">$0.00</span></div>
+            <div><span style="color:#9E9888; font-size:9px;">TOKENS</span><br><span style="color:#9E9888;">0</span></div>
+            <div><span style="color:#9E9888; font-size:9px;">SESSIONS</span><br><span style="color:#C4BFAF;">0</span></div>
+            <div><span style="color:#9E9888; font-size:9px;">MESSAGES</span><br><span style="color:#C4BFAF;">437</span></div>
+          </div>
+        </div>
+
+        <!-- Project Card: org-root (IDLE) -->
+        <div style="border-bottom:1px dashed #333; padding:14px 16px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+            <div>
+              <span style="color:#C4BFAF; font-weight:bold;">org-root</span>
+              <span style="color:#9E9888; font-size:9px; margin-left:6px;">idle · 2h ago</span>
+            </div>
+            <span style="color:#9E9888; font-size:9px; text-transform:uppercase; letter-spacing:0.5px;">Today</span>
+          </div>
+          <div style="display:flex; gap:20px;">
+            <div><span style="color:#9E9888; font-size:9px;">COST</span><br><span style="color:#9E9888;">$0.00</span></div>
+            <div><span style="color:#9E9888; font-size:9px;">TOKENS</span><br><span style="color:#9E9888;">0</span></div>
+            <div><span style="color:#9E9888; font-size:9px;">SESSIONS</span><br><span style="color:#C4BFAF;">3,479</span></div>
+            <div><span style="color:#9E9888; font-size:9px;">MESSAGES</span><br><span style="color:#C4BFAF;">23,268</span></div>
+          </div>
+        </div>
+
+        <!-- Add/manage projects row -->
+        <div style="padding:12px 16px; display:flex; align-items:center; gap:8px; cursor:pointer;">
+          <span style="color:#333; font-size:16px; border:1px dashed #333; border-radius:2px; width:20px; height:20px; display:flex; align-items:center; justify-content:center;">+</span>
+          <span style="color:#555; font-size:10px;">Manage projects</span>
+        </div>
+
+      </div>
+
+      <!-- RIGHT: Live Activity Feed (50% width now) -->
+      <div style="padding:14px 16px; overflow-y:auto;">
+        <div style="color:#9E9888; font-weight:bold; margin-bottom:10px; font-size:10px; text-transform:uppercase; letter-spacing:1px;">Live Activity</div>
+        <div style="font-size:10.5px; line-height:2;">
+          <div><span style="color:#9E9888;">09:14:02</span> <span style="color:#4CAF50;">telemetry-exporter</span> <span style="color:#C4BFAF;">🔧 Bash: Run tests after all fixes</span></div>
+          <div><span style="color:#9E9888;">09:13:58</span> <span style="color:#4CAF50;">telemetry-exporter</span> <span style="color:#C4BFAF;">📖 Read shipper.ts:337-357</span></div>
+          <div><span style="color:#9E9888;">09:13:55</span> <span style="color:#6fa8dc;">lo</span> <span style="color:#C4BFAF;">🔍 Grep: batchUpsertProjectTelemetry</span></div>
+          <div><span style="color:#9E9888;">09:13:51</span> <span style="color:#4CAF50;">telemetry-exporter</span> <span style="color:#C4BFAF;">✏️ Edit shipper.ts — add insert method</span></div>
+          <div><span style="color:#9E9888;">09:13:44</span> <span style="color:#6fa8dc;">lo</span> <span style="color:#C4BFAF;">📖 Read processor.ts:460-490</span></div>
+          <div><span style="color:#9E9888;">09:13:40</span> <span style="color:#4CAF50;">telemetry-exporter</span> <span style="color:#C4BFAF;">🔧 Bash: sqlite3 outbox status</span></div>
+          <div><span style="color:#9E9888;">09:13:32</span> <span style="color:#6fa8dc;">lo</span> <span style="color:#C4BFAF;">🚀 Spawned agent: Explore pipeline</span></div>
+          <div><span style="color:#9E9888;">09:13:28</span> <span style="color:#4CAF50;">telemetry-exporter</span> <span style="color:#C4BFAF;">🔧 Bash: tail error log</span></div>
+          <div><span style="color:#9E9888;">09:13:20</span> <span style="color:#4CAF50;">telemetry-exporter</span> <span style="color:#C4BFAF;">🔧 Bash: launchctl restart</span></div>
+          <div><span style="color:#9E9888;">09:12:55</span> <span style="color:#6fa8dc;">lo</span> <span style="color:#C4BFAF;">📖 Read daemon.ts:1-100</span></div>
+          <div><span style="color:#9E9888;">09:12:48</span> <span style="color:#4CAF50;">telemetry-exporter</span> <span style="color:#C4BFAF;">🔍 Grep: cost_lifetime column</span></div>
+          <div><span style="color:#9E9888;">09:12:40</span> <span style="color:#6fa8dc;">lo</span> <span style="color:#C4BFAF;">💬 Message to subagent</span></div>
+          <div><span style="color:#9E9888;">09:12:31</span> <span style="color:#4CAF50;">telemetry-exporter</span> <span style="color:#C4BFAF;">🔧 Bash: ALTER TABLE</span></div>
+          <div><span style="color:#9E9888;">09:12:20</span> <span style="color:#e8a87c;">claude-dashboard</span> <span style="color:#C4BFAF;">🟢 Session started</span></div>
+          <div><span style="color:#9E9888;">09:11:55</span> <span style="color:#4CAF50;">telemetry-exporter</span> <span style="color:#C4BFAF;">👋 Wants input</span></div>
+          <div><span style="color:#9E9888;">09:11:40</span> <span style="color:#6fa8dc;">lo</span> <span style="color:#C4BFAF;">🔐 Needs permission: write file</span></div>
+          <div><span style="color:#9E9888;">09:11:28</span> <span style="color:#4CAF50;">telemetry-exporter</span> <span style="color:#C4BFAF;">📖 Read CLAUDE.md:1-120</span></div>
+          <div style="color:#555; margin-top:10px; text-align:center; letter-spacing:2px;">· · ·</div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- BOTTOM: Health Strip (was top) -->
+    <div style="display:flex; gap:16px; padding:8px 16px; background:#1a1a1a; border-top:1px dashed #333; align-items:center; font-size:10px;">
+      <span style="color:#4CAF50; font-weight:bold; text-transform:uppercase; letter-spacing:0.5px;">● Operational</span>
+      <span style="color:#333;">│</span>
+      <span>Supabase <span style="color:#4CAF50;">✓</span></span>
+      <span>OTLP <span style="color:#4CAF50;">✓</span></span>
+      <span>Pipeline <span style="color:#4CAF50;">✓</span></span>
+      <span>Site <span style="color:#4CAF50;">✓</span></span>
+      <span style="color:#333;">│</span>
+      <span style="color:#9E9888;">Outbox: 0 pending</span>
+      <span style="color:#9E9888;">Archive: 38k draining</span>
+      <span style="flex:1;"></span>
+      <span style="color:#9E9888;">Opus: 18.5M tok · Haiku: 2.4M tok</span>
+    </div>
+
+  </div>
+</div>
+
+<div style="margin-top:20px; padding:16px; border:1px dashed #555; border-radius:4px; font-size:13px; line-height:1.6;">
+  <h3 style="margin-top:0;">Feedback on the "+" manage projects idea</h3>
+  <p>The instinct is right — you should control what you see. But "add a folder" creates two sources of truth (the exporter auto-discovers projects from <code>lo.yml</code> files, and now you're also manually adding them).</p>
+  <p><strong>Better framing: pin/unpin.</strong> All discovered projects exist in the system. The "+" becomes a drawer that shows all known projects with toggle switches. Pinned projects show as cards. Unpinned projects are hidden but still tracked. This way the exporter stays the authority for what projects exist, and the UI just controls what you see.</p>
+  <p>The mockup above shows the "+" as "Manage projects" — clicking it would open that pin/unpin drawer.</p>
+</div>
+
+<div style="margin-top:16px; padding:16px; border:1px dashed #555; border-radius:4px; font-size:13px; line-height:1.6;">
+  <h3 style="margin-top:0;">Changes in V2</h3>
+  <ul style="margin:0; padding-left:20px;">
+    <li><strong>"TODAY"</strong> label on each project card — clear time frame</li>
+    <li><strong>7-day vertical bar chart</strong> per project (day labels, height = relative token volume, active project bars are green, idle are gray)</li>
+    <li><strong>Swapped bars</strong> — facility summary + LORF logo at top, health at bottom</li>
+    <li><strong>● OPERATIONAL</strong> in health strip (was ACTIVE)</li>
+    <li><strong>50/50 split</strong> — live feed gets half the screen</li>
+    <li><strong>#141414 background</strong> — StockTaper dark mode <code>--color-cream</code></li>
+    <li><strong>Pin/unpin concept</strong> for project management (see feedback above)</li>
+  </ul>
+</div>

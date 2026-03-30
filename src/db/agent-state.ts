@@ -27,6 +27,26 @@ export async function pushAgentState(
   for (const p of processes) procByPid.set(p.pid, p);
 
   for (const event of diff.events) {
+    // For instance:closed, the PID is gone — use event.sessionId captured before cache clear
+    if (event.type === "instance:closed") {
+      const sessionId = event.sessionId;
+      if (!sessionId) continue;
+      knownSessions.delete(sessionId);
+      writes.push(
+        supabase
+          .from("agent_state")
+          .delete()
+          .eq("session_id", sessionId)
+          .then((result) => checkResult(result, {
+            operation: "agentState.delete",
+            category: "agent_state",
+            entity: { sessionId },
+          }))
+      );
+      continue;
+    }
+
+    // For all other events, look up the current process
     const proc = procByPid.get(event.pid);
     if (!proc?.sessionId || proc.projId === "unknown") continue;
 
@@ -61,19 +81,6 @@ export async function pushAgentState(
           .eq("session_id", proc.sessionId)
           .then((result) => checkResult(result, {
             operation: "agentState.updateStatus",
-            category: "agent_state",
-            entity: { sessionId: proc.sessionId },
-          }))
-      );
-    } else if (event.type === "instance:closed") {
-      knownSessions.delete(proc.sessionId);
-      writes.push(
-        supabase
-          .from("agent_state")
-          .delete()
-          .eq("session_id", proc.sessionId)
-          .then((result) => checkResult(result, {
-            operation: "agentState.delete",
             category: "agent_state",
             entity: { sessionId: proc.sessionId },
           }))

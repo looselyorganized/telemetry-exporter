@@ -1,0 +1,328 @@
+<h2>Facility Ops — V6</h2>
+<p class="subtitle">Lucide icons, unified notification ticker + bell, amber glow on attention indicators</p>
+
+<!-- Lucide-style SVG definitions -->
+<svg style="display:none;">
+  <defs>
+    <!-- Bell -->
+    <symbol id="ico-bell" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="m18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+    </symbol>
+    <!-- Hand (wave) -->
+    <symbol id="ico-hand" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M18 11V6a2 2 0 0 0-4 0v4"/><path d="M14 10V4a2 2 0 0 0-4 0v7"/><path d="M10 10.5V6a2 2 0 0 0-4 0v8"/><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"/>
+    </symbol>
+    <!-- Lock -->
+    <symbol id="ico-lock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+    </symbol>
+    <!-- Alert Triangle -->
+    <symbol id="ico-alert" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/>
+    </symbol>
+    <!-- Zap (for system alerts) -->
+    <symbol id="ico-zap" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z"/>
+    </symbol>
+    <!-- X (dismiss) -->
+    <symbol id="ico-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M18 6 6 18"/><path d="m6 6 12 12"/>
+    </symbol>
+    <!-- Grid (command) -->
+    <symbol id="ico-grid" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/>
+    </symbol>
+    <!-- List (activity log) -->
+    <symbol id="ico-list" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M3 12h.01"/><path d="M3 18h.01"/><path d="M3 6h.01"/><path d="M8 12h13"/><path d="M8 18h13"/><path d="M8 6h13"/>
+    </symbol>
+    <!-- Settings -->
+    <symbol id="ico-settings" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/>
+    </symbol>
+    <!-- Plus -->
+    <symbol id="ico-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M5 12h14"/><path d="M12 5v14"/>
+    </symbol>
+    <!-- Check -->
+    <symbol id="ico-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M20 6 9 17l-5-5"/>
+    </symbol>
+  </defs>
+</svg>
+
+<div class="mockup">
+  <div class="mockup-header">http://looselyorganized.com/ops</div>
+  <div class="mockup-body" style="padding:0; font-family: 'IBM Plex Mono', monospace; font-size: 11px; background: #141414; color: #E8E2D4; display:flex; min-height:560px;">
+
+    <!-- LEFT NAV -->
+    <div style="width:48px; background:#1a1a1a; border-right:1px dashed #333; display:flex; flex-direction:column; align-items:center; padding-top:12px; gap:16px; flex-shrink:0;">
+      <div style="width:30px; height:30px; border:1px dashed #333; border-radius:4px; display:flex; align-items:center; justify-content:center; font-size:8px; font-weight:bold; color:#E8E2D4; cursor:pointer;">LO</div>
+      <div style="width:30px; height:30px; background:#E8E2D4; border-radius:4px; display:flex; align-items:center; justify-content:center; cursor:pointer;" title="Command">
+        <svg style="width:16px;height:16px;color:#141414;"><use href="#ico-grid"/></svg>
+      </div>
+      <div style="width:30px; height:30px; border:1px dashed #333; border-radius:4px; display:flex; align-items:center; justify-content:center; cursor:pointer;" title="Activity Log">
+        <svg style="width:16px;height:16px;color:#9E9888;"><use href="#ico-list"/></svg>
+      </div>
+      <div style="width:30px; height:30px; border:1px dashed #333; border-radius:4px; display:flex; align-items:center; justify-content:center; cursor:pointer;" title="Settings">
+        <svg style="width:16px;height:16px;color:#9E9888;"><use href="#ico-settings"/></svg>
+      </div>
+      <div style="flex:1;"></div>
+      <div style="margin-bottom:12px;"><span style="color:#4CAF50; font-size:10px;">●</span></div>
+    </div>
+
+    <!-- MAIN AREA -->
+    <div style="flex:1; display:flex; flex-direction:column; overflow:hidden;">
+
+      <!-- HEADER BAR -->
+      <div style="display:flex; gap:0; background:#1a1a1a; border-bottom:1px dashed #333; align-items:stretch; font-size:10px; flex-shrink:0;">
+
+        <!-- Facility Stats -->
+        <div style="display:flex; align-items:center; gap:16px; padding:10px 16px; border-right:1px dashed #333;">
+          <div><span style="color:#9E9888; font-size:8px; text-transform:uppercase;">Cost</span><br><span style="font-weight:bold; font-size:14px;">$14.37</span></div>
+          <div><span style="color:#9E9888; font-size:8px; text-transform:uppercase;">Tokens</span><br><span style="font-weight:bold; font-size:14px;">65.1M</span></div>
+          <div><span style="color:#9E9888; font-size:8px; text-transform:uppercase;">Sessions</span><br><span style="font-size:12px;">5</span></div>
+          <div><span style="color:#9E9888; font-size:8px; text-transform:uppercase;">Messages</span><br><span style="font-size:12px;">29</span></div>
+        </div>
+
+        <!-- Model Breakdown -->
+        <div style="display:flex; align-items:center; gap:12px; padding:10px 16px; border-right:1px dashed #333;">
+          <div><span style="color:#c49bff; font-size:9px;">● Opus 4.6</span> <span style="font-size:11px;">62.7M</span></div>
+          <div><span style="color:#7cc8ff; font-size:9px;">● Haiku 4.5</span> <span style="font-size:11px;">2.4M</span></div>
+        </div>
+
+        <!-- Notification Ticker (fills remaining space) -->
+        <div style="flex:1; display:flex; align-items:center; padding:0 16px; overflow:hidden; border-right:1px dashed #333; cursor:pointer;">
+          <svg style="width:14px; height:14px; color:#ff9800; flex-shrink:0; margin-right:8px;"><use href="#ico-alert"/></svg>
+          <div style="overflow:hidden; white-space:nowrap; flex:1;">
+            <span style="color:#C4BFAF; font-size:9px; display:inline-block; animation: scroll 22s linear infinite;">
+              telemetry-exporter passed $10 budget threshold &nbsp;&nbsp;·&nbsp;&nbsp; Archive backlog: 38k rows draining &nbsp;&nbsp;·&nbsp;&nbsp; telemetry-exporter passed $10 budget threshold &nbsp;&nbsp;·&nbsp;&nbsp; Archive backlog: 38k rows draining
+            </span>
+          </div>
+        </div>
+
+        <!-- Time Range -->
+        <div style="display:flex; align-items:center; gap:2px; padding:10px 12px; border-right:1px dashed #333;">
+          <span style="background:#E8E2D4; color:#141414; padding:3px 10px; font-size:9px; font-weight:bold; border-radius:2px; cursor:pointer;">Today</span>
+          <span style="color:#9E9888; padding:3px 10px; font-size:9px; cursor:pointer;">7D</span>
+          <span style="color:#9E9888; padding:3px 10px; font-size:9px; cursor:pointer;">30D</span>
+          <span style="color:#9E9888; padding:3px 10px; font-size:9px; cursor:pointer;">All</span>
+        </div>
+
+        <!-- Bell -->
+        <div style="display:flex; align-items:center; padding:10px 14px; cursor:pointer; position:relative;">
+          <svg style="width:16px; height:16px; color:#9E9888;"><use href="#ico-bell"/></svg>
+          <span style="position:absolute; top:6px; right:8px; background:#EF5350; color:#141414; font-size:7px; font-weight:bold; width:13px; height:13px; border-radius:7px; display:flex; align-items:center; justify-content:center;">2</span>
+        </div>
+      </div>
+
+      <!-- PROJECT CARDS: 2-row stacking grid -->
+      <div style="flex:1; overflow-x:auto; overflow-y:hidden; padding:14px; display:grid; grid-template-rows: 1fr 1fr; grid-auto-flow: column; grid-auto-columns: 310px; gap:12px; align-content:start;">
+
+        <!-- telemetry-exporter (ACTIVE, WAITING) -->
+        <div style="background:#1a1a1a; border:1px dashed #333; border-radius:6px; padding:14px; position:relative; box-shadow: 0 0 14px rgba(255, 152, 0, 0.15);">
+          <div style="position:absolute; top:-1px; left:-1px; right:-1px; bottom:-1px; border:1px solid rgba(255, 152, 0, 0.35); border-radius:6px; pointer-events:none;"></div>
+
+          <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:8px;">
+            <div>
+              <span style="color:#4CAF50; font-weight:bold; font-size:12px;">telemetry-exporter</span>
+              <div style="color:#4CAF50; font-size:9px; margin-top:2px;">active · 2 agents</div>
+            </div>
+          </div>
+          <div style="display:flex; gap:14px; margin-bottom:10px; font-size:10px;">
+            <div><span style="color:#9E9888; font-size:8px;">COST</span><br><span style="font-size:14px; font-weight:bold;">$14.37</span></div>
+            <div><span style="color:#9E9888; font-size:8px;">TOKENS</span><br><span style="font-size:14px; font-weight:bold;">62.7M</span></div>
+            <div><span style="color:#9E9888; font-size:8px;">SESSIONS</span><br><span>3</span></div>
+            <div><span style="color:#9E9888; font-size:8px;">MSGS</span><br><span>22</span></div>
+          </div>
+
+          <!-- 7-day bars -->
+          <div style="display:flex; align-items:flex-end; gap:3px; height:22px; margin-bottom:10px;">
+            <div style="flex:1;display:flex;flex-direction:column;align-items:center;"><div style="width:100%;height:4px;background:#1e3a1e;border-radius:1px;"></div><span style="font-size:7px;color:#555;margin-top:1px;">21</span></div>
+            <div style="flex:1;display:flex;flex-direction:column;align-items:center;"><div style="width:100%;height:2px;background:#1e3a1e;border-radius:1px;"></div><span style="font-size:7px;color:#555;margin-top:1px;">22</span></div>
+            <div style="flex:1;display:flex;flex-direction:column;align-items:center;"><div style="width:100%;height:6px;background:#1e3a1e;border-radius:1px;"></div><span style="font-size:7px;color:#555;margin-top:1px;">23</span></div>
+            <div style="flex:1;display:flex;flex-direction:column;align-items:center;"><div style="width:100%;height:8px;background:#1e3a1e;border-radius:1px;"></div><span style="font-size:7px;color:#555;margin-top:1px;">24</span></div>
+            <div style="flex:1;display:flex;flex-direction:column;align-items:center;"><div style="width:100%;height:5px;background:#1e3a1e;border-radius:1px;"></div><span style="font-size:7px;color:#555;margin-top:1px;">25</span></div>
+            <div style="flex:1;display:flex;flex-direction:column;align-items:center;"><div style="width:100%;height:10px;background:#2a5a2a;border-radius:1px;"></div><span style="font-size:7px;color:#555;margin-top:1px;">26</span></div>
+            <div style="flex:1;display:flex;flex-direction:column;align-items:center;"><div style="width:100%;height:20px;background:#4CAF50;border-radius:1px;"></div><span style="font-size:7px;color:#9E9888;margin-top:1px;">27</span></div>
+          </div>
+
+          <!-- Agents box -->
+          <div style="background:#141414; border:1px dashed #333; border-radius:3px; padding:8px 10px; font-size:9px;">
+            <div style="color:#9E9888; font-size:8px; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:5px;">Agents</div>
+
+            <!-- Agent 1: waiting -->
+            <div style="display:flex; align-items:center; gap:6px; margin-bottom:5px;">
+              <span style="color:#4CAF50;">●</span>
+              <span style="color:#C4BFAF;">PID 93783</span>
+              <span style="color:#9E9888;">Opus · 699MB · 2h04m</span>
+              <span style="flex:1;"></span>
+              <span style="display:inline-flex; filter: drop-shadow(0 0 4px rgba(255, 152, 0, 0.6));">
+                <svg style="width:14px; height:14px; color:#ff9800; animation: glow 2s ease-in-out infinite;"><use href="#ico-hand"/></svg>
+              </span>
+            </div>
+            <div style="margin-left:14px; border-left:1px dashed #333; padding-left:8px; font-size:8px;">
+              <div style="color:#9E9888; margin-bottom:2px;">├ <span style="color:#c49bff;">Explore</span> pipeline <span style="color:#4CAF50;">●</span></div>
+              <div style="color:#9E9888; margin-bottom:2px;">├ <span style="color:#c49bff;">Audit</span> Supabase <span style="color:#555;">done</span></div>
+              <div style="color:#9E9888;">└ <span style="color:#c49bff;">Check</span> 24h loss <span style="color:#555;">done</span></div>
+            </div>
+
+            <!-- Agent 2: needs permission -->
+            <div style="margin-top:6px; padding-top:5px; border-top:1px dashed #282828; display:flex; align-items:center; gap:6px;">
+              <span style="color:#ff9800;">●</span>
+              <span style="color:#C4BFAF;">PID 91608</span>
+              <span style="color:#9E9888;">Opus · 273MB · 2h05m</span>
+              <span style="flex:1;"></span>
+              <span style="display:inline-flex; filter: drop-shadow(0 0 4px rgba(255, 152, 0, 0.6));">
+                <svg style="width:13px; height:13px; color:#ff9800; animation: glow 2s ease-in-out infinite;"><use href="#ico-lock"/></svg>
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <!-- lo (ACTIVE) -->
+        <div style="background:#1a1a1a; border:1px dashed #333; border-radius:6px; padding:14px;">
+          <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:8px;">
+            <div>
+              <span style="color:#4CAF50; font-weight:bold; font-size:12px;">lo</span>
+              <div style="color:#4CAF50; font-size:9px; margin-top:2px;">active · 1 agent</div>
+            </div>
+          </div>
+          <div style="display:flex; gap:14px; margin-bottom:10px; font-size:10px;">
+            <div><span style="color:#9E9888; font-size:8px;">COST</span><br><span style="font-size:14px; font-weight:bold;">$2.41</span></div>
+            <div><span style="color:#9E9888; font-size:8px;">TOKENS</span><br><span style="font-size:14px; font-weight:bold;">2.4M</span></div>
+            <div><span style="color:#9E9888; font-size:8px;">SESSIONS</span><br><span>2</span></div>
+            <div><span style="color:#9E9888; font-size:8px;">MSGS</span><br><span>7</span></div>
+          </div>
+          <div style="display:flex; align-items:flex-end; gap:3px; height:22px; margin-bottom:10px;">
+            <div style="flex:1;display:flex;flex-direction:column;align-items:center;"><div style="width:100%;height:6px;background:#1e3a1e;border-radius:1px;"></div><span style="font-size:7px;color:#555;margin-top:1px;">21</span></div>
+            <div style="flex:1;display:flex;flex-direction:column;align-items:center;"><div style="width:100%;height:3px;background:#1e3a1e;border-radius:1px;"></div><span style="font-size:7px;color:#555;margin-top:1px;">22</span></div>
+            <div style="flex:1;display:flex;flex-direction:column;align-items:center;"><div style="width:100%;height:0px;background:#1e3a1e;border-radius:1px;"></div><span style="font-size:7px;color:#555;margin-top:1px;">23</span></div>
+            <div style="flex:1;display:flex;flex-direction:column;align-items:center;"><div style="width:100%;height:2px;background:#1e3a1e;border-radius:1px;"></div><span style="font-size:7px;color:#555;margin-top:1px;">24</span></div>
+            <div style="flex:1;display:flex;flex-direction:column;align-items:center;"><div style="width:100%;height:8px;background:#1e3a1e;border-radius:1px;"></div><span style="font-size:7px;color:#555;margin-top:1px;">25</span></div>
+            <div style="flex:1;display:flex;flex-direction:column;align-items:center;"><div style="width:100%;height:12px;background:#2a5a2a;border-radius:1px;"></div><span style="font-size:7px;color:#555;margin-top:1px;">26</span></div>
+            <div style="flex:1;display:flex;flex-direction:column;align-items:center;"><div style="width:100%;height:10px;background:#4CAF50;border-radius:1px;"></div><span style="font-size:7px;color:#9E9888;margin-top:1px;">27</span></div>
+          </div>
+          <div style="background:#141414; border:1px dashed #333; border-radius:3px; padding:8px 10px; font-size:9px;">
+            <div style="color:#9E9888; font-size:8px; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:5px;">Agents</div>
+            <div style="display:flex; align-items:center; gap:6px;">
+              <span style="color:#ff9800;">●</span>
+              <span style="color:#C4BFAF;">PID 91608</span>
+              <span style="color:#9E9888;">Opus · 273MB · 2h05m · 0.7%</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- platform (IDLE) -->
+        <div style="background:#1a1a1a; border:1px dashed #333; border-radius:6px; padding:14px; opacity:0.7;">
+          <div style="margin-bottom:8px;">
+            <span style="color:#C4BFAF; font-weight:bold; font-size:12px;">platform</span>
+            <div style="color:#9E9888; font-size:9px; margin-top:2px;">idle · 19h ago</div>
+          </div>
+          <div style="display:flex; gap:14px; margin-bottom:10px; font-size:10px;">
+            <div><span style="color:#9E9888; font-size:8px;">COST</span><br><span style="color:#9E9888;">$0.00</span></div>
+            <div><span style="color:#9E9888; font-size:8px;">TOKENS</span><br><span style="color:#9E9888;">0</span></div>
+            <div><span style="color:#9E9888; font-size:8px;">SESSIONS</span><br><span style="color:#C4BFAF;">828</span></div>
+            <div><span style="color:#9E9888; font-size:8px;">MSGS</span><br><span style="color:#C4BFAF;">16,943</span></div>
+          </div>
+          <div style="display:flex; align-items:flex-end; gap:3px; height:22px;">
+            <div style="flex:1;display:flex;flex-direction:column;align-items:center;"><div style="width:100%;height:12px;background:#282828;border-radius:1px;"></div><span style="font-size:7px;color:#555;margin-top:1px;">21</span></div>
+            <div style="flex:1;display:flex;flex-direction:column;align-items:center;"><div style="width:100%;height:8px;background:#282828;border-radius:1px;"></div><span style="font-size:7px;color:#555;margin-top:1px;">22</span></div>
+            <div style="flex:1;display:flex;flex-direction:column;align-items:center;"><div style="width:100%;height:3px;background:#282828;border-radius:1px;"></div><span style="font-size:7px;color:#555;margin-top:1px;">23</span></div>
+            <div style="flex:1;display:flex;flex-direction:column;align-items:center;"><div style="width:100%;height:15px;background:#282828;border-radius:1px;"></div><span style="font-size:7px;color:#555;margin-top:1px;">24</span></div>
+            <div style="flex:1;display:flex;flex-direction:column;align-items:center;"><div style="width:100%;height:6px;background:#282828;border-radius:1px;"></div><span style="font-size:7px;color:#555;margin-top:1px;">25</span></div>
+            <div style="flex:1;display:flex;flex-direction:column;align-items:center;"><div style="width:100%;height:10px;background:#282828;border-radius:1px;"></div><span style="font-size:7px;color:#555;margin-top:1px;">26</span></div>
+            <div style="flex:1;display:flex;flex-direction:column;align-items:center;"><div style="width:100%;height:0px;border-radius:1px;"></div><span style="font-size:7px;color:#555;margin-top:1px;">27</span></div>
+          </div>
+        </div>
+
+        <!-- lorf-agent-zip (IDLE) -->
+        <div style="background:#1a1a1a; border:1px dashed #333; border-radius:6px; padding:14px; opacity:0.7;">
+          <div style="margin-bottom:8px;">
+            <span style="color:#C4BFAF; font-weight:bold; font-size:12px;">lorf-agent-zip</span>
+            <div style="color:#9E9888; font-size:9px; margin-top:2px;">idle · 2d ago</div>
+          </div>
+          <div style="display:flex; gap:14px; font-size:10px;">
+            <div><span style="color:#9E9888; font-size:8px;">COST</span><br><span style="color:#9E9888;">$0.00</span></div>
+            <div><span style="color:#9E9888; font-size:8px;">TOKENS</span><br><span style="color:#9E9888;">0</span></div>
+            <div><span style="color:#9E9888; font-size:8px;">SESSIONS</span><br><span style="color:#C4BFAF;">0</span></div>
+            <div><span style="color:#9E9888; font-size:8px;">MSGS</span><br><span style="color:#C4BFAF;">437</span></div>
+          </div>
+        </div>
+
+        <!-- org-root (IDLE) -->
+        <div style="background:#1a1a1a; border:1px dashed #333; border-radius:6px; padding:14px; opacity:0.7;">
+          <div style="margin-bottom:8px;">
+            <span style="color:#C4BFAF; font-weight:bold; font-size:12px;">org-root</span>
+            <div style="color:#9E9888; font-size:9px; margin-top:2px;">idle · 2h ago</div>
+          </div>
+          <div style="display:flex; gap:14px; font-size:10px;">
+            <div><span style="color:#9E9888; font-size:8px;">COST</span><br><span style="color:#9E9888;">$0.00</span></div>
+            <div><span style="color:#9E9888; font-size:8px;">TOKENS</span><br><span style="color:#9E9888;">0</span></div>
+            <div><span style="color:#9E9888; font-size:8px;">SESSIONS</span><br><span style="color:#C4BFAF;">3,479</span></div>
+            <div><span style="color:#9E9888; font-size:8px;">MSGS</span><br><span style="color:#C4BFAF;">23,268</span></div>
+          </div>
+        </div>
+
+        <!-- claude-dashboard (IDLE) -->
+        <div style="background:#1a1a1a; border:1px dashed #333; border-radius:6px; padding:14px; opacity:0.7;">
+          <div style="margin-bottom:8px;">
+            <span style="color:#C4BFAF; font-weight:bold; font-size:12px;">claude-dashboard</span>
+            <div style="color:#9E9888; font-size:9px; margin-top:2px;">idle · 2d ago</div>
+          </div>
+          <div style="display:flex; gap:14px; font-size:10px;">
+            <div><span style="color:#9E9888; font-size:8px;">COST</span><br><span style="color:#9E9888;">$0.00</span></div>
+            <div><span style="color:#9E9888; font-size:8px;">TOKENS</span><br><span style="color:#9E9888;">0</span></div>
+            <div><span style="color:#9E9888; font-size:8px;">SESSIONS</span><br><span style="color:#C4BFAF;">969</span></div>
+            <div><span style="color:#9E9888; font-size:8px;">MSGS</span><br><span style="color:#C4BFAF;">6,563</span></div>
+          </div>
+        </div>
+
+        <!-- ADD card -->
+        <div style="grid-row: 1 / 3; min-width:80px; background:transparent; border:1px dashed #333; border-radius:6px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:6px; cursor:pointer;">
+          <svg style="width:20px; height:20px; color:#555;"><use href="#ico-plus"/></svg>
+          <span style="color:#555; font-size:8px;">Add</span>
+        </div>
+
+      </div>
+
+      <!-- HEALTH STRIP -->
+      <div style="display:flex; gap:14px; padding:8px 16px; background:#1a1a1a; border-top:1px dashed #333; align-items:center; font-size:10px; flex-shrink:0;">
+        <span style="color:#4CAF50; font-weight:bold; text-transform:uppercase; letter-spacing:0.5px;">● Operational</span>
+        <span style="color:#333;">│</span>
+        <span>Supabase <svg style="width:11px;height:11px;color:#4CAF50;vertical-align:-1px;"><use href="#ico-check"/></svg></span>
+        <span>OTLP <svg style="width:11px;height:11px;color:#4CAF50;vertical-align:-1px;"><use href="#ico-check"/></svg></span>
+        <span>Pipeline <svg style="width:11px;height:11px;color:#4CAF50;vertical-align:-1px;"><use href="#ico-check"/></svg></span>
+        <span>Site <svg style="width:11px;height:11px;color:#4CAF50;vertical-align:-1px;"><use href="#ico-check"/></svg></span>
+        <span style="color:#333;">│</span>
+        <span style="color:#9E9888;">972MB RAM · 2 instances</span>
+        <span style="color:#333;">│</span>
+        <span style="color:#9E9888;">Outbox: 0 · Archive: 38k</span>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<style>
+  @keyframes scroll {
+    0% { transform: translateX(0); }
+    100% { transform: translateX(-50%); }
+  }
+  @keyframes glow {
+    0%, 100% { opacity: 0.6; filter: drop-shadow(0 0 2px rgba(255, 152, 0, 0.3)); }
+    50% { opacity: 1; filter: drop-shadow(0 0 6px rgba(255, 152, 0, 0.8)); }
+  }
+</style>
+
+<div style="margin-top:20px; padding:16px; border:1px dashed #555; border-radius:4px; font-size:13px; line-height:1.8;">
+  <h3 style="margin-top:0;">V6 — Final Refinements</h3>
+  <ul style="margin:0; padding-left:20px;">
+    <li><strong>All icons are Lucide SVGs</strong> — bell, hand (waiting), lock (permission), alert-triangle (notifications), grid (command), list (activity), settings, plus, check</li>
+    <li><strong>Unified notification: ticker + bell</strong> — Ticker scrolls in the header between [Models] and [Date Range]. Bell is the archive/manage entry point. One data source, two access patterns.</li>
+    <li><strong>Hand & Lock icons glow amber</strong> — <code>drop-shadow</code> pulse animation in #ff9800. Same color = same meaning ("your turn"). Icon shape differentiates the action.</li>
+    <li><strong>Health strip check marks</strong> — Lucide check icons replace ✓ text</li>
+    <li><strong>Left nav icons</strong> — Lucide grid (command), list (activity log), settings</li>
+    <li><strong>Plus icon</strong> — Lucide plus in the add card</li>
+  </ul>
+</div>

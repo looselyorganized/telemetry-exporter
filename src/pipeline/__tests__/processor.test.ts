@@ -813,14 +813,14 @@ describe("Processor.processOtelBatch", () => {
     const countFirst = (db.query("SELECT COUNT(*) as c FROM outbox WHERE target = 'alerts'").get() as any).c;
     expect(countFirst).toBe(1); // $5 threshold
 
-    // Budget alerts now use in-batch cost, not accumulated cost_tracking.
-    // Second batch with same $6 cost triggers $5 again but it's already fired.
-    // No $10 threshold crossed since each batch is independent.
+    // Budget alerts use cumulative rollup cost. Second batch adds another $6,
+    // bringing cumulative to $12 which crosses $10. $5 already fired, so only
+    // $10 is new — total 2 alerts.
     processor.processOtelBatch(batch);
     const countSecond = (db.query("SELECT COUNT(*) as c FROM outbox WHERE target = 'alerts'").get() as any).c;
 
-    // Same $5 threshold was already fired, $6 < $10 — no new alerts
-    expect(countSecond).toBe(1);
+    // $5 already fired, cumulative $12 crosses $10 — 1 new alert, 2 total
+    expect(countSecond).toBe(2);
   });
 
   test("does not fire alert below threshold", () => {
