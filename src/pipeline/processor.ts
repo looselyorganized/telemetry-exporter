@@ -3,7 +3,7 @@ import type { ProjectResolver } from "../project/resolver";
 import type { LogEntry, ModelStats, StatsCache } from "../parsers";
 import type { ProjectTokenMap } from "../project/scanner";
 import { computeTokensByProject } from "../project/scanner";
-import { enqueue, enqueueArchive, addKnownProject, getKnownProjectIds, upsertCostTracking, getCostByProject } from "../db/local";
+import { enqueue, enqueueArchive, addKnownProject, getKnownProjectIds } from "../db/local";
 import type { OtelEventBatch } from "./otel-receiver";
 import { getSupabase } from "../db/client";
 import { formatModelStats, type LifetimeCounters } from "../../bin/daemon-helpers";
@@ -71,8 +71,16 @@ export class Processor {
   private todayTokensTotal: number = 0;
   private lastDailyPayloads: Map<string, string> = new Map();
   private lastTelemetryPayloads: Map<string, string> = new Map();
-  /** Track (projId, date) pairs that have OTel data — prevents JSONL format ping-pong. */
-  private otelCoveredPairs: Set<string> = new Set();
+  /** Accumulate daily rollup data across processOtelBatch and processEvents. */
+  private pendingRollups = new Map<string, {
+    project_id: string;
+    date: string;
+    tokens: Record<string, { input: number; cache_read: number; cache_write: number; output: number }>;
+    cost: Record<string, number>;
+    events: Record<string, number>;
+    sessions: number;
+    errors: number;
+  }>();
   /** Track fired budget alerts per (projId, date, threshold) to prevent re-firing. */
   private firedAlerts: Set<string> = new Set();
   private static BUDGET_THRESHOLDS = [5, 10, 25];
@@ -152,6 +160,14 @@ export class Processor {
 
       for (const [projId, lastActive] of latestByProject) {
         enqueue("projects", { id: projId, slug: slugByProject.get(projId), last_active: lastActive });
+      }
+
+      // Step 6: Accumulate event counts into daily rollups
+      for (const { entry, projId } of resolved) {
+        const timestamp = entry.parsedTimestamp?.toISOString() ?? new Date().toISOString();
+        const date = timestamp.substring(0, 10);
+        const rollup = this.getRollup(projId, date);
+        rollup.events[entry.eventType] = (rollup.events[entry.eventType] ?? 0) + 1;
       }
     })();
   }
@@ -245,9 +261,6 @@ export class Processor {
           // Date guard: only sync past dates on the first run of the day
           if (date !== today && !isNewDailySync) continue;
 
-          // Skip JSONL writes for pairs that have OTel data (prevents format ping-pong)
-          if (this.otelCoveredPairs.has(`${projId}\0${date}`)) continue;
-
           const evCounts = eventCounts.get(projId)?.get(date);
           const payload = {
             date,
@@ -333,33 +346,24 @@ export class Processor {
   }
 
   /**
-   * Process a batch of OTel events: update cost_tracking, enqueue daily_metrics
-   * with per-type token breakdown, and enqueue tool_result events.
+   * Process a batch of OTel events: enqueue raw per-request data,
+   * accumulate tokens/cost into pendingRollups, process tool_decision
+   * rejects and api_errors into events table.
    */
   processOtelBatch(batch: OtelEventBatch): void {
-    if (batch.apiRequests.length === 0 && batch.toolResults.length === 0) return;
+    if (batch.apiRequests.length === 0 && batch.toolResults.length === 0
+        && batch.toolDecisionRejects.length === 0 && batch.apiErrors.length === 0) return;
 
     const today = new Date().toISOString().substring(0, 10);
 
     this.db.transaction(() => {
-      // 1. Process api_request events → cost_tracking + daily_metrics
-      // Aggregate by (projId, date, model) within this batch
-      const aggregated = new Map<string, {
-        projId: string;
-        date: string;
-        model: string;
-        input: number;
-        output: number;
-        cacheRead: number;
-        cacheWrite: number;
-        cost: number;
-        count: number;
-      }>();
+      // 1. Ship raw per-request data + accumulate into daily rollups
+      const batchCostByProject = new Map<string, number>();
 
       for (const req of batch.apiRequests) {
         const date = req.timestamp.substring(0, 10);
 
-        // Ship raw per-request event to Supabase (proj_id already resolved)
+        // Ship raw per-request to Supabase
         enqueue("otel_api_requests", {
           project_id: req.projId,
           session_id: req.sessionId,
@@ -373,153 +377,60 @@ export class Processor {
           timestamp: req.timestamp,
         });
 
-        // Upsert cost_tracking (per-request granularity)
-        upsertCostTracking(req.projId, date, req.model, {
-          input: req.inputTokens,
-          output: req.outputTokens,
-          cache_read: req.cacheReadTokens,
-          cache_write: req.cacheWriteTokens,
-        }, req.costUsd);
-
-        // Mark this pair as OTel-covered (prevents JSONL format ping-pong)
-        this.otelCoveredPairs.add(`${req.projId}\0${date}`);
-
-        // Aggregate for daily_metrics enqueue
-        const key = `${req.projId}\0${date}\0${req.model}`;
-        let agg = aggregated.get(key);
-        if (!agg) {
-          agg = { projId: req.projId, date, model: req.model, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, count: 0 };
-          aggregated.set(key, agg);
+        // Accumulate into daily rollups
+        const rollup = this.getRollup(req.projId, date);
+        if (!rollup.tokens[req.model]) {
+          rollup.tokens[req.model] = { input: 0, cache_read: 0, cache_write: 0, output: 0 };
         }
-        agg.input += req.inputTokens;
-        agg.output += req.outputTokens;
-        agg.cacheRead += req.cacheReadTokens;
-        agg.cacheWrite += req.cacheWriteTokens;
-        agg.cost += req.costUsd;
-        agg.count++;
-      }
+        rollup.tokens[req.model].input += req.inputTokens;
+        rollup.tokens[req.model].output += req.outputTokens;
+        rollup.tokens[req.model].cache_read += req.cacheReadTokens;
+        rollup.tokens[req.model].cache_write += req.cacheWriteTokens;
 
-      // Query cost_tracking once per affected project — reused for daily_metrics and project_telemetry
-      const affectedProjects = new Set<string>();
-      for (const req of batch.apiRequests) {
-        affectedProjects.add(req.projId);
-      }
+        rollup.cost[req.model] = (rollup.cost[req.model] ?? 0) + req.costUsd;
 
-      const costByProject = new Map<string, import("../db/local").CostTrackingRow[]>();
-      for (const projId of affectedProjects) {
-        costByProject.set(projId, getCostByProject(projId));
-      }
-
-      // Build daily_metrics payloads grouped by (projId, date)
-      const dailyGroups = new Map<string, {
-        projId: string;
-        date: string;
-        models: Record<string, { input: number; cache_read: number; cache_write: number; output: number }>;
-      }>();
-
-      for (const agg of aggregated.values()) {
-        const groupKey = `${agg.projId}\0${agg.date}`;
-        let group = dailyGroups.get(groupKey);
-        if (!group) {
-          group = { projId: agg.projId, date: agg.date, models: {} };
-          dailyGroups.set(groupKey, group);
-        }
-
-        // Read current totals from cost_tracking (cached query)
-        const costRow = costByProject.get(agg.projId)?.find(r => r.date === agg.date && r.model === agg.model);
-        if (costRow) {
-          group.models[agg.model] = {
-            input: costRow.input_tokens,
-            cache_read: costRow.cache_read_tokens,
-            cache_write: costRow.cache_write_tokens,
-            output: costRow.output_tokens,
-          };
-        } else {
-          group.models[agg.model] = {
-            input: agg.input,
-            cache_read: agg.cacheRead,
-            cache_write: agg.cacheWrite,
-            output: agg.output,
-          };
+        // Track today's cost for budget alerts
+        if (date === today) {
+          batchCostByProject.set(req.projId, (batchCostByProject.get(req.projId) ?? 0) + req.costUsd);
         }
       }
 
-      // Enqueue daily_metrics with new JSONB format
-      for (const group of dailyGroups.values()) {
-        const payload = {
-          date: group.date,
-          project_id: group.projId,
-          tokens: group.models,
-        };
-
-        // Per-payload dedup
-        const dailyJson = JSON.stringify(payload);
-        const dailyKey = `${group.projId}\0${group.date}`;
-        if (this.lastDailyPayloads.get(dailyKey) === dailyJson) continue;
-        this.lastDailyPayloads.set(dailyKey, dailyJson);
-
-        enqueue("daily_metrics", payload);
-      }
-
-      // Enqueue project_telemetry with accumulated cost_tracking totals (reusing cached query)
-      for (const projId of affectedProjects) {
-        const costRows = costByProject.get(projId) ?? [];
-        let tokensLifetime = 0;
-        let costLifetime = 0;
-        const todayModels: Record<string, { input: number; cache_read: number; cache_write: number; output: number }> = {};
-        let todayTotal = 0;
-
-        for (const row of costRows) {
-          const rowTotal = row.input_tokens + row.output_tokens + row.cache_read_tokens + row.cache_write_tokens;
-          tokensLifetime += rowTotal;
-          costLifetime += row.cost_usd;
-
-          if (row.date === today) {
-            todayModels[row.model] = {
-              input: row.input_tokens,
-              cache_read: row.cache_read_tokens,
-              cache_write: row.cache_write_tokens,
-              output: row.output_tokens,
-            };
-            todayTotal += rowTotal;
-          }
-        }
-
-        const telemetryPayload = {
-          project_id: projId,
-          tokens_lifetime: tokensLifetime,
-          tokens_today: todayTotal,
-          models_today: todayModels,
-          cost_lifetime: costLifetime,
-        };
-
-        // Per-payload dedup
-        const telemetryJson = JSON.stringify(telemetryPayload);
-        if (this.lastTelemetryPayloads.get(projId) === telemetryJson) continue;
-        this.lastTelemetryPayloads.set(projId, telemetryJson);
-
-        enqueue("project_telemetry", telemetryPayload);
-      }
-
-      // 2. Process tool_result events → events target
-      // Classify by tool_name to match JSONL emoji-based types
+      // 2. Accumulate tool_result counts into daily rollups (not individual events — events.log covers that)
       for (const tool of batch.toolResults) {
+        const date = tool.timestamp.substring(0, 10);
+        const rollup = this.getRollup(tool.projId, date);
+        const toolType = classifyToolName(tool.toolName);
+        rollup.events[toolType] = (rollup.events[toolType] ?? 0) + 1;
+      }
+
+      // 3. Enqueue tool_decision rejects as individual events (for attention alerts)
+      for (const reject of batch.toolDecisionRejects) {
         enqueue("events", {
-          project_id: tool.projId,
-          event_type: classifyToolName(tool.toolName),
-          event_text: `${tool.toolName} (${tool.success ? "success" : "failure"}, ${tool.durationMs}ms)`,
-          timestamp: tool.timestamp,
+          project_id: reject.projId,
+          session_id: reject.sessionId,
+          event_type: "tool_decision_reject",
+          event_text: `🔐 ${reject.toolName} rejected`,
+          timestamp: reject.timestamp,
         });
       }
 
-      // 3. Budget threshold alerts
-      for (const projId of affectedProjects) {
-        const costRows = costByProject.get(projId) ?? [];
-        let todayCost = 0;
-        for (const row of costRows) {
-          if (row.date === today) todayCost += row.cost_usd;
-        }
+      // 4. Enqueue api_errors as individual events + accumulate error count
+      for (const err of batch.apiErrors) {
+        const date = err.timestamp.substring(0, 10);
+        const rollup = this.getRollup(err.projId, date);
+        rollup.errors += 1;
 
+        enqueue("events", {
+          project_id: err.projId,
+          session_id: err.sessionId,
+          event_type: "api_error",
+          event_text: `⚠️ ${err.statusCode} ${err.error} (${err.model})`,
+          timestamp: err.timestamp,
+        });
+      }
+
+      // 5. Budget threshold alerts
+      for (const [projId, todayCost] of batchCostByProject) {
         for (const threshold of Processor.BUDGET_THRESHOLDS) {
           const alertKey = `${projId}\0${today}\0${threshold}`;
           if (todayCost >= threshold && !this.firedAlerts.has(alertKey)) {
@@ -608,7 +519,29 @@ export class Processor {
     await this.resolver.refresh();
   }
 
+  /** Flush accumulated daily rollups to the outbox. Call once per pipeline cycle. */
+  flushRollups(): void {
+    for (const [key, rollup] of this.pendingRollups) {
+      const json = JSON.stringify(rollup);
+      if (this.lastDailyPayloads.get(key) === json) continue;
+      this.lastDailyPayloads.set(key, json);
+      enqueue("daily_rollups", rollup);
+    }
+    this.pendingRollups.clear();
+  }
+
   // ─── Private helpers ──────────────────────────────────────────────────────
+
+  /** Get or create a pending rollup entry for a (project, date) pair. */
+  private getRollup(projId: string, date: string) {
+    const key = `${projId}\0${date}`;
+    let rollup = this.pendingRollups.get(key);
+    if (!rollup) {
+      rollup = { project_id: projId, date, tokens: {}, cost: {}, events: {}, sessions: 0, errors: 0 };
+      this.pendingRollups.set(key, rollup);
+    }
+    return rollup;
+  }
 
   /** Shared implementation for hydrate() and refreshBaselines(). */
   private async _loadBaselinesFromSupabase(): Promise<void> {

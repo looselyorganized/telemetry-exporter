@@ -287,13 +287,17 @@ async function pipelineLoop(): Promise<never> {
       // OTel pipeline: poll unprocessed events, process into outbox
       try {
         const otelBatch = otelReceiver.poll();
-        if (otelBatch.apiRequests.length > 0 || otelBatch.toolResults.length > 0) {
+        if (otelBatch.apiRequests.length > 0 || otelBatch.toolResults.length > 0
+            || otelBatch.toolDecisionRejects.length > 0 || otelBatch.apiErrors.length > 0) {
           processor.processOtelBatch(otelBatch);
         }
         if (otelBatch.unresolved > 0 && cycle % 12 === 0) {
           console.log(`  ${time()} — ${otelBatch.unresolved} OTel events awaiting session resolution`);
         }
       } catch (e) { reportError("otel_processing", `otelReceiver: ${errMsg(e)}`); }
+
+      // Flush accumulated daily rollups (unified across processEvents + processOtelBatch)
+      processor.flushRollups();
 
       // Ship -> Supabase
       const result = await shipper.ship();

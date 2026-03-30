@@ -1294,22 +1294,35 @@ describe("Processor.refreshResolver", () => {
 // ---------------------------------------------------------------------------
 
 describe("Processor.processOtelBatch", () => {
+  /** Helper: create a minimal valid OtelEventBatch with defaults for new fields. */
+  function makeBatch(overrides: Partial<import("../../pipeline/otel-receiver").OtelEventBatch> = {}): import("../../pipeline/otel-receiver").OtelEventBatch {
+    return {
+      apiRequests: [],
+      toolResults: [],
+      toolDecisionRejects: [],
+      apiErrors: [],
+      unresolved: 0,
+      skipped: 0,
+      ...overrides,
+    };
+  }
+
   test("does nothing for empty batch", () => {
     const resolver = new MockResolver({});
     const processor = new Processor(resolver as any, db);
 
-    processor.processOtelBatch({ apiRequests: [], toolResults: [], unresolved: 0 });
+    processor.processOtelBatch(makeBatch());
 
     const rows = db.query("SELECT COUNT(*) as c FROM outbox").get() as any;
     expect(rows.c).toBe(0);
   });
 
-  test("upserts cost_tracking from api_request events", () => {
+  test("enqueues otel_api_requests per request", () => {
     const resolver = new MockResolver({});
     const processor = new Processor(resolver as any, db);
     const today = todayStr();
 
-    processor.processOtelBatch({
+    processor.processOtelBatch(makeBatch({
       apiRequests: [
         {
           projId: "proj_abc",
@@ -1324,104 +1337,74 @@ describe("Processor.processOtelBatch", () => {
           timestamp: `${today}T12:00:00.000Z`,
         },
       ],
-      toolResults: [],
-      unresolved: 0,
-    });
-
-    const costRows = db
-      .query("SELECT * FROM cost_tracking WHERE proj_id = 'proj_abc'")
-      .all() as any[];
-    expect(costRows).toHaveLength(1);
-    expect(costRows[0].input_tokens).toBe(1000);
-    expect(costRows[0].output_tokens).toBe(500);
-    expect(costRows[0].cache_read_tokens).toBe(5000);
-    expect(costRows[0].cache_write_tokens).toBe(200);
-    expect(costRows[0].request_count).toBe(1);
-  });
-
-  test("enqueues daily_metrics with new JSONB format", () => {
-    const resolver = new MockResolver({});
-    const processor = new Processor(resolver as any, db);
-    const today = todayStr();
-
-    processor.processOtelBatch({
-      apiRequests: [
-        {
-          projId: "proj_abc",
-          sessionId: "sess-1",
-          model: "claude-opus-4-6",
-          inputTokens: 1000,
-          outputTokens: 500,
-          cacheReadTokens: 5000,
-          cacheWriteTokens: 200,
-          costUsd: 0.05,
-          durationMs: 1234,
-          timestamp: `${today}T12:00:00.000Z`,
-        },
-      ],
-      toolResults: [],
-      unresolved: 0,
-    });
+    }));
 
     const rows = db
-      .query("SELECT * FROM outbox WHERE target = 'daily_metrics'")
+      .query("SELECT * FROM outbox WHERE target = 'otel_api_requests'")
+      .all() as any[];
+    expect(rows).toHaveLength(1);
+
+    const payload = JSON.parse(rows[0].payload);
+    expect(payload.project_id).toBe("proj_abc");
+    expect(payload.model).toBe("claude-opus-4-6");
+    expect(payload.input_tokens).toBe(1000);
+    expect(payload.output_tokens).toBe(500);
+  });
+
+  test("accumulates tokens and cost into pendingRollups via flushRollups", () => {
+    const resolver = new MockResolver({});
+    const processor = new Processor(resolver as any, db);
+    const today = todayStr();
+
+    processor.processOtelBatch(makeBatch({
+      apiRequests: [
+        {
+          projId: "proj_abc",
+          sessionId: "sess-1",
+          model: "claude-opus-4-6",
+          inputTokens: 1000,
+          outputTokens: 500,
+          cacheReadTokens: 5000,
+          cacheWriteTokens: 200,
+          costUsd: 0.05,
+          durationMs: 1234,
+          timestamp: `${today}T12:00:00.000Z`,
+        },
+      ],
+    }));
+
+    // Before flush, no daily_rollups in outbox
+    const beforeFlush = db
+      .query("SELECT COUNT(*) as c FROM outbox WHERE target = 'daily_rollups'")
+      .get() as any;
+    expect(beforeFlush.c).toBe(0);
+
+    // Flush
+    processor.flushRollups();
+
+    const rows = db
+      .query("SELECT * FROM outbox WHERE target = 'daily_rollups'")
       .all() as any[];
     expect(rows).toHaveLength(1);
 
     const payload = JSON.parse(rows[0].payload);
     expect(payload.date).toBe(today);
     expect(payload.project_id).toBe("proj_abc");
-    // New format: model → breakdown object
     expect(payload.tokens["claude-opus-4-6"]).toEqual({
       input: 1000,
       cache_read: 5000,
       cache_write: 200,
       output: 500,
     });
+    expect(payload.cost["claude-opus-4-6"]).toBeCloseTo(0.05);
   });
 
-  test("enqueues project_telemetry with accumulated totals", () => {
+  test("accumulates multiple api_requests for same model into rollup", () => {
     const resolver = new MockResolver({});
     const processor = new Processor(resolver as any, db);
     const today = todayStr();
 
-    processor.processOtelBatch({
-      apiRequests: [
-        {
-          projId: "proj_abc",
-          sessionId: "sess-1",
-          model: "opus",
-          inputTokens: 1000,
-          outputTokens: 500,
-          cacheReadTokens: 5000,
-          cacheWriteTokens: 200,
-          costUsd: 0.05,
-          durationMs: 100,
-          timestamp: `${today}T12:00:00.000Z`,
-        },
-      ],
-      toolResults: [],
-      unresolved: 0,
-    });
-
-    const rows = db
-      .query("SELECT * FROM outbox WHERE target = 'project_telemetry'")
-      .all() as any[];
-    expect(rows).toHaveLength(1);
-
-    const payload = JSON.parse(rows[0].payload);
-    expect(payload.project_id).toBe("proj_abc");
-    expect(payload.tokens_lifetime).toBe(6700); // 1000 + 500 + 5000 + 200
-    expect(payload.tokens_today).toBe(6700);
-    expect(payload.cost_lifetime).toBeCloseTo(0.05);
-  });
-
-  test("accumulates multiple api_requests for same model", () => {
-    const resolver = new MockResolver({});
-    const processor = new Processor(resolver as any, db);
-    const today = todayStr();
-
-    processor.processOtelBatch({
+    processor.processOtelBatch(makeBatch({
       apiRequests: [
         {
           projId: "proj_abc", sessionId: "s1", model: "opus",
@@ -1434,26 +1417,30 @@ describe("Processor.processOtelBatch", () => {
           costUsd: 0.02, durationMs: 200, timestamp: `${today}T12:01:00.000Z`,
         },
       ],
-      toolResults: [],
-      unresolved: 0,
-    });
+    }));
 
-    // cost_tracking should accumulate
-    const costRows = db
-      .query("SELECT * FROM cost_tracking WHERE proj_id = 'proj_abc'")
+    processor.flushRollups();
+
+    const rows = db
+      .query("SELECT * FROM outbox WHERE target = 'daily_rollups'")
       .all() as any[];
-    expect(costRows).toHaveLength(1);
-    expect(costRows[0].input_tokens).toBe(3000);
-    expect(costRows[0].output_tokens).toBe(800);
-    expect(costRows[0].request_count).toBe(2);
+    expect(rows).toHaveLength(1);
+
+    const payload = JSON.parse(rows[0].payload);
+    expect(payload.tokens["opus"]).toEqual({
+      input: 3000,
+      cache_read: 0,
+      cache_write: 0,
+      output: 800,
+    });
+    expect(payload.cost["opus"]).toBeCloseTo(0.05);
   });
 
-  test("enqueues tool_result events to events target", () => {
+  test("accumulates tool_result counts into rollup events", () => {
     const resolver = new MockResolver({});
     const processor = new Processor(resolver as any, db);
 
-    processor.processOtelBatch({
-      apiRequests: [],
+    processor.processOtelBatch(makeBatch({
       toolResults: [
         {
           projId: "proj_abc",
@@ -1472,81 +1459,173 @@ describe("Processor.processOtelBatch", () => {
           timestamp: "2026-03-26T12:00:01.000Z",
         },
       ],
-      unresolved: 0,
-    });
+    }));
+
+    processor.flushRollups();
+
+    const rows = db
+      .query("SELECT * FROM outbox WHERE target = 'daily_rollups'")
+      .all() as any[];
+    expect(rows).toHaveLength(1);
+
+    const payload = JSON.parse(rows[0].payload);
+    // Bash → "tool", Read → "read"
+    expect(payload.events["tool"]).toBe(1);
+    expect(payload.events["read"]).toBe(1);
+  });
+
+  test("does not enqueue tool_results as individual events", () => {
+    const resolver = new MockResolver({});
+    const processor = new Processor(resolver as any, db);
+
+    processor.processOtelBatch(makeBatch({
+      toolResults: [
+        {
+          projId: "proj_abc",
+          sessionId: "sess-1",
+          toolName: "Bash",
+          success: true,
+          durationMs: 567,
+          timestamp: "2026-03-26T12:00:00.000Z",
+        },
+      ],
+    }));
+
+    // Tool results should NOT be in events target (only in rollups)
+    const eventRows = db
+      .query("SELECT * FROM outbox WHERE target = 'events'")
+      .all() as any[];
+    expect(eventRows).toHaveLength(0);
+  });
+
+  test("enqueues tool_decision rejects as individual events", () => {
+    const resolver = new MockResolver({});
+    const processor = new Processor(resolver as any, db);
+
+    processor.processOtelBatch(makeBatch({
+      toolDecisionRejects: [
+        {
+          projId: "proj_abc",
+          sessionId: "sess-1",
+          toolName: "Bash",
+          timestamp: "2026-03-26T12:00:00.000Z",
+        },
+      ],
+    }));
 
     const rows = db
       .query("SELECT * FROM outbox WHERE target = 'events'")
       .all() as any[];
-    expect(rows).toHaveLength(2);
+    expect(rows).toHaveLength(1);
 
-    const p1 = JSON.parse(rows[0].payload);
-    expect(p1.event_type).toBe("tool");
-    expect(p1.event_text).toContain("Bash");
-    expect(p1.event_text).toContain("success");
-
-    const p2 = JSON.parse(rows[1].payload);
-    expect(p2.event_text).toContain("Read");
-    expect(p2.event_text).toContain("failure");
+    const payload = JSON.parse(rows[0].payload);
+    expect(payload.event_type).toBe("tool_decision_reject");
+    expect(payload.event_text).toContain("Bash");
+    expect(payload.event_text).toContain("rejected");
   });
 
-  test("per-payload dedup: identical batch is not re-enqueued", () => {
+  test("enqueues api_errors as individual events and accumulates error count in rollup", () => {
     const resolver = new MockResolver({});
     const processor = new Processor(resolver as any, db);
     const today = todayStr();
 
-    const batch = {
+    processor.processOtelBatch(makeBatch({
+      apiErrors: [
+        {
+          projId: "proj_abc",
+          sessionId: "sess-1",
+          error: "rate_limited",
+          statusCode: 429,
+          model: "opus",
+          timestamp: `${today}T12:00:00.000Z`,
+        },
+        {
+          projId: "proj_abc",
+          sessionId: "sess-1",
+          error: "server_error",
+          statusCode: 500,
+          model: "opus",
+          timestamp: `${today}T12:01:00.000Z`,
+        },
+      ],
+    }));
+
+    // Individual events enqueued
+    const eventRows = db
+      .query("SELECT * FROM outbox WHERE target = 'events'")
+      .all() as any[];
+    expect(eventRows).toHaveLength(2);
+
+    const p1 = JSON.parse(eventRows[0].payload);
+    expect(p1.event_type).toBe("api_error");
+    expect(p1.event_text).toContain("429");
+    expect(p1.event_text).toContain("rate_limited");
+
+    // Rollup error count
+    processor.flushRollups();
+    const rollupRows = db
+      .query("SELECT * FROM outbox WHERE target = 'daily_rollups'")
+      .all() as any[];
+    expect(rollupRows).toHaveLength(1);
+    const rollup = JSON.parse(rollupRows[0].payload);
+    expect(rollup.errors).toBe(2);
+  });
+
+  test("per-payload dedup via flushRollups: identical rollup is not re-enqueued", () => {
+    const resolver = new MockResolver({});
+    const processor = new Processor(resolver as any, db);
+    const today = todayStr();
+
+    const batch = makeBatch({
       apiRequests: [{
         projId: "proj_abc", sessionId: "s1", model: "opus",
         inputTokens: 1000, outputTokens: 500, cacheReadTokens: 0, cacheWriteTokens: 0,
         costUsd: 0.03, durationMs: 100, timestamp: `${today}T12:00:00.000Z`,
       }],
-      toolResults: [] as any[],
-      unresolved: 0,
-    };
+    });
 
     processor.processOtelBatch(batch);
-    const countFirst = (db.query("SELECT COUNT(*) as c FROM outbox WHERE target = 'daily_metrics'").get() as any).c;
+    processor.flushRollups();
+    const countFirst = (db.query("SELECT COUNT(*) as c FROM outbox WHERE target = 'daily_rollups'").get() as any).c;
+    expect(countFirst).toBe(1);
 
-    // Second call: cost_tracking accumulates BUT daily_metrics should read the same accumulated state
-    // Actually, cost_tracking will have doubled values, so the payload WILL be different
-    // This test verifies the dedup mechanism is in place
+    // Second batch with identical data — pendingRollups was cleared, so it builds
+    // the same rollup again. flushRollups dedup should skip it.
     processor.processOtelBatch(batch);
-    const countSecond = (db.query("SELECT COUNT(*) as c FROM outbox WHERE target = 'daily_metrics'").get() as any).c;
+    processor.flushRollups();
+    const countSecond = (db.query("SELECT COUNT(*) as c FROM outbox WHERE target = 'daily_rollups'").get() as any).c;
 
-    // Second call should produce a different payload (accumulated tokens doubled)
-    // so it SHOULD enqueue a new row
-    expect(countSecond).toBe(2);
+    // Identical payload — dedup should prevent re-enqueue
+    expect(countSecond).toBe(1);
   });
 
-  test("coexistence: OTel-covered pairs prevent JSONL daily_metrics writes", () => {
+  test("flushRollups enqueues when rollup data changes between cycles", () => {
     const resolver = new MockResolver({});
     const processor = new Processor(resolver as any, db);
     const today = todayStr();
 
-    // First: process OTel data for proj_abc today
-    processor.processOtelBatch({
+    processor.processOtelBatch(makeBatch({
       apiRequests: [{
         projId: "proj_abc", sessionId: "s1", model: "opus",
         inputTokens: 1000, outputTokens: 500, cacheReadTokens: 0, cacheWriteTokens: 0,
         costUsd: 0.03, durationMs: 100, timestamp: `${today}T12:00:00.000Z`,
       }],
-      toolResults: [],
-      unresolved: 0,
-    });
+    }));
+    processor.flushRollups();
 
-    const otelDailyCount = (db.query("SELECT COUNT(*) as c FROM outbox WHERE target = 'daily_metrics'").get() as any).c;
-    expect(otelDailyCount).toBe(1);
+    // Second cycle with different data
+    processor.processOtelBatch(makeBatch({
+      apiRequests: [{
+        projId: "proj_abc", sessionId: "s1", model: "opus",
+        inputTokens: 2000, outputTokens: 700, cacheReadTokens: 0, cacheWriteTokens: 0,
+        costUsd: 0.05, durationMs: 150, timestamp: `${today}T12:05:00.000Z`,
+      }],
+    }));
+    processor.flushRollups();
 
-    // Now: processTokens with JSONL data for the same (proj_abc, today)
-    const tokenMap = makeTokenMap({
-      proj_abc: { [today]: { "opus": 99999 } },
-    });
-    processor.processTokens(tokenMap);
-
-    // Should NOT enqueue a new daily_metrics for proj_abc/today (OTel-covered)
-    const totalDailyCount = (db.query("SELECT COUNT(*) as c FROM outbox WHERE target = 'daily_metrics'").get() as any).c;
-    expect(totalDailyCount).toBe(otelDailyCount);
+    const count = (db.query("SELECT COUNT(*) as c FROM outbox WHERE target = 'daily_rollups'").get() as any).c;
+    // Different payload — should enqueue a second row
+    expect(count).toBe(2);
   });
 
   test("fires budget alert when daily cost exceeds threshold", () => {
@@ -1555,15 +1634,13 @@ describe("Processor.processOtelBatch", () => {
     const today = todayStr();
 
     // Send enough cost to exceed $5 threshold
-    processor.processOtelBatch({
+    processor.processOtelBatch(makeBatch({
       apiRequests: [{
         projId: "proj_expensive", sessionId: "s1", model: "opus",
         inputTokens: 100000, outputTokens: 50000, cacheReadTokens: 0, cacheWriteTokens: 0,
         costUsd: 6.0, durationMs: 100, timestamp: `${today}T12:00:00.000Z`,
       }],
-      toolResults: [],
-      unresolved: 0,
-    });
+    }));
 
     const alertRows = db
       .query("SELECT * FROM outbox WHERE target = 'alerts'")
@@ -1582,15 +1659,13 @@ describe("Processor.processOtelBatch", () => {
     const processor = new Processor(resolver as any, db);
     const today = todayStr();
 
-    processor.processOtelBatch({
+    processor.processOtelBatch(makeBatch({
       apiRequests: [{
         projId: "proj_big", sessionId: "s1", model: "opus",
         inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0,
         costUsd: 26.0, durationMs: 100, timestamp: `${today}T12:00:00.000Z`,
       }],
-      toolResults: [],
-      unresolved: 0,
-    });
+    }));
 
     const alertRows = db
       .query("SELECT * FROM outbox WHERE target = 'alerts'")
@@ -1607,25 +1682,26 @@ describe("Processor.processOtelBatch", () => {
     const processor = new Processor(resolver as any, db);
     const today = todayStr();
 
-    const batch = {
+    const batch = makeBatch({
       apiRequests: [{
         projId: "proj_repeat", sessionId: "s1", model: "opus",
         inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0,
         costUsd: 6.0, durationMs: 100, timestamp: `${today}T12:00:00.000Z`,
       }],
-      toolResults: [] as any[],
-      unresolved: 0,
-    };
+    });
 
     processor.processOtelBatch(batch);
     const countFirst = (db.query("SELECT COUNT(*) as c FROM outbox WHERE target = 'alerts'").get() as any).c;
     expect(countFirst).toBe(1); // $5 threshold
 
+    // Budget alerts now use in-batch cost, not accumulated cost_tracking.
+    // Second batch with same $6 cost triggers $5 again but it's already fired.
+    // No $10 threshold crossed since each batch is independent.
     processor.processOtelBatch(batch);
     const countSecond = (db.query("SELECT COUNT(*) as c FROM outbox WHERE target = 'alerts'").get() as any).c;
 
-    // $10 threshold now crossed (6+6=12), so one more alert fires
-    expect(countSecond).toBe(2); // $5 (first) + $10 (second)
+    // Same $5 threshold was already fired, $6 < $10 — no new alerts
+    expect(countSecond).toBe(1);
   });
 
   test("does not fire alert below threshold", () => {
@@ -1633,19 +1709,57 @@ describe("Processor.processOtelBatch", () => {
     const processor = new Processor(resolver as any, db);
     const today = todayStr();
 
-    processor.processOtelBatch({
+    processor.processOtelBatch(makeBatch({
       apiRequests: [{
         projId: "proj_cheap", sessionId: "s1", model: "opus",
         inputTokens: 100, outputTokens: 50, cacheReadTokens: 0, cacheWriteTokens: 0,
         costUsd: 0.01, durationMs: 100, timestamp: `${today}T12:00:00.000Z`,
       }],
-      toolResults: [],
-      unresolved: 0,
-    });
+    }));
 
     const alertRows = db
       .query("SELECT * FROM outbox WHERE target = 'alerts'")
       .all();
     expect(alertRows).toHaveLength(0);
+  });
+
+  test("unified accumulator: OTel tokens and event counts in same rollup", () => {
+    const resolver = new MockResolver({
+      "my-project": { projId: "proj_abc", slug: "my-project" },
+    });
+    const processor = new Processor(resolver as any, db);
+    const today = todayStr();
+
+    // Process events (from JSONL pipeline)
+    processor.processEvents([
+      makeEntry({
+        project: "my-project",
+        eventType: "session_start",
+        parsedTimestamp: new Date(`${today}T09:00:00Z`),
+      }),
+    ]);
+
+    // Process OTel batch (from OTel pipeline)
+    processor.processOtelBatch(makeBatch({
+      apiRequests: [{
+        projId: "proj_abc", sessionId: "s1", model: "opus",
+        inputTokens: 1000, outputTokens: 500, cacheReadTokens: 0, cacheWriteTokens: 0,
+        costUsd: 0.03, durationMs: 100, timestamp: `${today}T10:00:00.000Z`,
+      }],
+    }));
+
+    // Flush produces ONE unified rollup with both tokens and event counts
+    processor.flushRollups();
+
+    const rows = db
+      .query("SELECT * FROM outbox WHERE target = 'daily_rollups'")
+      .all() as any[];
+    expect(rows).toHaveLength(1);
+
+    const payload = JSON.parse(rows[0].payload);
+    expect(payload.project_id).toBe("proj_abc");
+    expect(payload.tokens["opus"].input).toBe(1000);
+    expect(payload.events["session_start"]).toBe(1);
+    expect(payload.cost["opus"]).toBeCloseTo(0.03);
   });
 });
