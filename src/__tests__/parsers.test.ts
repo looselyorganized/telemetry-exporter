@@ -282,25 +282,3 @@ describe("LogTailer", () => {
   });
 });
 
-describe("readModelStats", () => {
-  // readModelStats reads from a hardcoded MODEL_FILE (~/.claude/model-stats).
-  // We can't redirect it without mock.module (which leaks in Bun).
-  // The parsing logic is thoroughly tested in read-model-stats.test.ts.
-  // Here we verify the function's contract: always returns an array of valid shapes.
-
-  test("returns an array with valid entry shapes", async () => {
-    const { readModelStats } = await import("../parsers");
-    const result = readModelStats();
-    expect(Array.isArray(result)).toBe(true);
-    for (const entry of result) {
-      expect(entry).toHaveProperty("model");
-      expect(entry).toHaveProperty("total");
-      expect(entry).toHaveProperty("input");
-      expect(entry).toHaveProperty("cacheWrite");
-      expect(entry).toHaveProperty("cacheRead");
-      expect(entry).toHaveProperty("output");
-      expect(typeof entry.model).toBe("string");
-      expect(typeof entry.total).toBe("number");
-    }
-  });
-});

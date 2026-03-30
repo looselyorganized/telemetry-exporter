@@ -3,14 +3,11 @@ import {
   formatTokens,
   sumValues,
   computeLastActive,
-  formatModelStats,
   filterAndMapEntries,
   aggregateProjectEvents,
-  buildProjectTelemetryUpdates,
   filterRecentEntries,
-  type ProjectTelemetryInput,
 } from "../daemon-helpers";
-import type { LogEntry, ModelStats } from "../../src/parsers";
+import type { LogEntry } from "../../src/parsers";
 
 // ─── Test helpers ───────────────────────────────────────────────────────────
 
@@ -132,45 +129,6 @@ describe("computeLastActive", () => {
   });
 });
 
-// ─── formatModelStats ───────────────────────────────────────────────────────
-
-describe("formatModelStats", () => {
-  test("transforms array to keyed object", () => {
-    const stats: ModelStats[] = [
-      { model: "claude-3", total: 100, input: 40, cacheWrite: 10, cacheRead: 30, output: 20 },
-    ];
-    const result = formatModelStats(stats);
-    expect(result).toEqual({
-      "claude-3": { total: 100, input: 40, cacheWrite: 10, cacheRead: 30, output: 20 },
-    });
-  });
-
-  test("handles multiple models", () => {
-    const stats: ModelStats[] = [
-      { model: "model-a", total: 50, input: 20, cacheWrite: 5, cacheRead: 15, output: 10 },
-      { model: "model-b", total: 200, input: 80, cacheWrite: 20, cacheRead: 60, output: 40 },
-    ];
-    const result = formatModelStats(stats);
-    expect(Object.keys(result)).toHaveLength(2);
-    expect(result["model-b"]).toEqual({
-      total: 200, input: 80, cacheWrite: 20, cacheRead: 60, output: 40,
-    });
-  });
-
-  test("returns empty object for empty input", () => {
-    expect(formatModelStats([])).toEqual({});
-  });
-
-  test("last model wins on duplicate names", () => {
-    const stats: ModelStats[] = [
-      { model: "dup", total: 1, input: 1, cacheWrite: 0, cacheRead: 0, output: 0 },
-      { model: "dup", total: 99, input: 99, cacheWrite: 0, cacheRead: 0, output: 0 },
-    ];
-    const result = formatModelStats(stats);
-    expect((result["dup"] as any).total).toBe(99);
-  });
-});
-
 // ─── filterAndMapEntries ────────────────────────────────────────────────────
 
 describe("filterAndMapEntries", () => {
@@ -208,8 +166,8 @@ describe("filterAndMapEntries", () => {
       parsedTimestamp: ts,
       eventType: "session_start",
       branch: "main",
-      emoji: "🟢",
-      eventText: "🟢 Session started",
+      emoji: "\u{1F7E2}",
+      eventText: "\u{1F7E2} Session started",
     })];
     const result = filterAndMapEntries(entries, resolver);
     expect(result[0].project).toBe("proj_aaa");
@@ -339,92 +297,6 @@ describe("aggregateProjectEvents", () => {
 
   test("returns empty map for empty input", () => {
     expect(aggregateProjectEvents([], resolver).size).toBe(0);
-  });
-});
-
-// ─── buildProjectTelemetryUpdates ───────────────────────────────────────────
-
-describe("buildProjectTelemetryUpdates", () => {
-  const emptyCaches: ProjectTelemetryInput = {
-    tokensByProject: {},
-    lifetimeCounters: {},
-    todayTokensByProject: {},
-  };
-
-  test("returns empty array when all caches are empty", () => {
-    expect(buildProjectTelemetryUpdates(emptyCaches)).toHaveLength(0);
-  });
-
-  test("builds update from tokensByProject", () => {
-    const caches: ProjectTelemetryInput = {
-      tokensByProject: { "proj_a": 1_000_000 },
-      lifetimeCounters: {},
-      todayTokensByProject: {},
-    };
-    const result = buildProjectTelemetryUpdates(caches);
-    expect(result).toHaveLength(1);
-    expect(result[0].projId).toBe("proj_a");
-    expect(result[0].tokensLifetime).toBe(1_000_000);
-    expect(result[0].sessionsLifetime).toBe(0);
-    expect(result[0].activeAgents).toBe(0);
-  });
-
-  test("merges data from all caches for same projId", () => {
-    const caches: ProjectTelemetryInput = {
-      tokensByProject: { "proj_a": 500_000 },
-      lifetimeCounters: {
-        "proj_a": { sessions: 10, messages: 50, toolCalls: 200, agentSpawns: 3, teamMessages: 5 },
-      },
-      todayTokensByProject: {
-        "proj_a": { total: 100_000, models: { "claude-4": 100_000 } },
-      },
-    };
-    const result = buildProjectTelemetryUpdates(caches);
-    expect(result).toHaveLength(1);
-    expect(result[0].tokensLifetime).toBe(500_000);
-    expect(result[0].tokensToday).toBe(100_000);
-    expect(result[0].modelsToday).toEqual({ "claude-4": 100_000 });
-    expect(result[0].sessionsLifetime).toBe(10);
-    expect(result[0].messagesLifetime).toBe(50);
-    expect(result[0].toolCallsLifetime).toBe(200);
-    expect(result[0].agentSpawnsLifetime).toBe(3);
-    expect(result[0].teamMessagesLifetime).toBe(5);
-  });
-
-  test("includes agent counts from agentsByProject param", () => {
-    const caches: ProjectTelemetryInput = {
-      tokensByProject: { "proj_a": 100 },
-      lifetimeCounters: {},
-      todayTokensByProject: {},
-    };
-    const agents = { "proj_a": { count: 3, active: 2 } };
-    const result = buildProjectTelemetryUpdates(caches, agents);
-    expect(result[0].activeAgents).toBe(2);
-    expect(result[0].agentCount).toBe(3);
-  });
-
-  test("unions projIds across all caches", () => {
-    const caches: ProjectTelemetryInput = {
-      tokensByProject: { "proj_a": 100 },
-      lifetimeCounters: { "proj_b": { sessions: 1, messages: 0, toolCalls: 0, agentSpawns: 0, teamMessages: 0 } },
-      todayTokensByProject: { "proj_c": { total: 50, models: {} } },
-    };
-    const result = buildProjectTelemetryUpdates(caches);
-    const ids = result.map((r) => r.projId).sort();
-    expect(ids).toEqual(["proj_a", "proj_b", "proj_c"]);
-  });
-
-  test("defaults missing cache data to zeros", () => {
-    const caches: ProjectTelemetryInput = {
-      tokensByProject: {},
-      lifetimeCounters: {},
-      todayTokensByProject: {},
-    };
-    const agents = { "proj_x": { count: 1, active: 0 } };
-    const result = buildProjectTelemetryUpdates(caches, agents);
-    expect(result[0].tokensLifetime).toBe(0);
-    expect(result[0].tokensToday).toBe(0);
-    expect(result[0].sessionsLifetime).toBe(0);
   });
 });
 

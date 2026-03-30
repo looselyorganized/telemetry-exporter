@@ -158,8 +158,8 @@ const PENDING_WHERE = `status = 'pending'
 /**
  * Return up to `limit` pending rows whose backoff window has elapsed.
  *
- * Uses priority-aware dequeue: non-event targets (projects, daily_metrics,
- * project_telemetry, facility_metrics) are fetched first, then events fill
+ * Uses priority-aware dequeue: non-event targets (projects, sessions,
+ * daily_rollups, alerts) are fetched first, then events fill
  * the remaining slots. This prevents high-volume events from starving
  * higher-priority targets via head-of-line blocking.
  */

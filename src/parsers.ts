@@ -11,8 +11,6 @@ import { join } from "path";
 
 const CLAUDE_DIR = join(homedir(), ".claude");
 export const LOG_FILE = join(CLAUDE_DIR, "events.log");
-export const MODEL_FILE = join(CLAUDE_DIR, "model-stats");
-export const STATS_CACHE_FILE = join(CLAUDE_DIR, "stats-cache.json");
 
 // ─── ANSI stripping ────────────────────────────────────────────────────────
 
@@ -227,69 +225,3 @@ export class LogTailer {
   }
 }
 
-// ─── Model stats reader ────────────────────────────────────────────────────
-
-export interface ModelStats {
-  model: string;
-  total: number;
-  input: number;
-  cacheWrite: number;
-  cacheRead: number;
-  output: number;
-}
-
-export function readModelStats(): ModelStats[] {
-  try {
-    return readFileSync(MODEL_FILE, "utf-8")
-      .trim()
-      .split("\n")
-      .map((line) => line.trim().split(/\s+/))
-      .filter((parts) => parts.length >= 6)
-      .map((parts) => ({
-        model: parts[0],
-        total: parseInt(parts[1], 10),
-        input: parseInt(parts[2], 10),
-        cacheWrite: parseInt(parts[3], 10),
-        cacheRead: parseInt(parts[4], 10),
-        output: parseInt(parts[5], 10),
-      }));
-  } catch {
-    return [];
-  }
-}
-
-// ─── Stats cache reader ────────────────────────────────────────────────────
-
-export interface StatsCache {
-  dailyActivity: Array<{
-    date: string;
-    messageCount: number;
-    sessionCount: number;
-    toolCallCount: number;
-  }>;
-  dailyModelTokens: Array<{
-    date: string;
-    tokensByModel: Record<string, number>;
-  }>;
-  modelUsage: Record<
-    string,
-    {
-      inputTokens: number;
-      outputTokens: number;
-      cacheReadInputTokens: number;
-      cacheCreationInputTokens: number;
-    }
-  >;
-  totalSessions: number;
-  totalMessages: number;
-  firstSessionDate: string;
-  hourCounts: Record<string, number>;
-}
-
-export function readStatsCache(): StatsCache | null {
-  try {
-    return JSON.parse(readFileSync(STATS_CACHE_FILE, "utf-8"));
-  } catch {
-    return null;
-  }
-}

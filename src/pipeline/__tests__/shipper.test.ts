@@ -123,7 +123,7 @@ describe("groupByTarget", () => {
       makeRow({ id: 1, target: "events" }),
       makeRow({ id: 2, target: "projects" }),
       makeRow({ id: 3, target: "events" }),
-      makeRow({ id: 4, target: "daily_metrics" }),
+      makeRow({ id: 4, target: "daily_rollups" }),
     ];
 
     const grouped = groupByTarget(rows);
@@ -131,7 +131,7 @@ describe("groupByTarget", () => {
     expect(grouped.size).toBe(3);
     expect(grouped.get("events")!.length).toBe(2);
     expect(grouped.get("projects")!.length).toBe(1);
-    expect(grouped.get("daily_metrics")!.length).toBe(1);
+    expect(grouped.get("daily_rollups")!.length).toBe(1);
     expect(grouped.get("events")!.map((r) => r.id)).toEqual([1, 3]);
   });
 
@@ -146,9 +146,8 @@ describe("groupByTarget", () => {
 // ---------------------------------------------------------------------------
 
 describe("sortByPriority", () => {
-  test("sorts targets by strategy priority (sessions first, deprecated last)", () => {
+  test("sorts targets by strategy priority (sessions first)", () => {
     const targets = [
-      "facility_metrics",
       "daily_rollups",
       "events",
       "projects",
@@ -160,13 +159,12 @@ describe("sortByPriority", () => {
       "projects",
       "events",
       "daily_rollups",
-      "facility_metrics",
     ]);
   });
 
   test("handles subset of targets", () => {
-    const sorted = sortByPriority(["facility_metrics", "projects"]);
-    expect(sorted).toEqual(["projects", "facility_metrics"]);
+    const sorted = sortByPriority(["alerts", "projects"]);
+    expect(sorted).toEqual(["projects", "alerts"]);
   });
 
   test("unknown targets are sorted last (after known ones)", () => {
@@ -401,35 +399,6 @@ describe("Shipper.ship()", () => {
     expect(outboxDepth()).toBe(0);
   });
 
-  test("deduplicates singleton target facility_metrics — keeps only latest", async () => {
-    enqueue("facility_metrics", { status: "active", tokens: 100 });
-    enqueue("facility_metrics", { status: "active", tokens: 200 });
-    enqueue("facility_metrics", { status: "active", tokens: 300 }); // highest id — this one ships
-
-    const shipped: any[] = [];
-    const supabase = {
-      from: (table: string) => ({
-        upsert: (p: any, _o?: any) => { shipped.push(p); return Promise.resolve({ data: [], error: null }); },
-        update: (p: any) => ({
-          match: (_f: any) => { shipped.push(p); return Promise.resolve({ data: [], error: null }); },
-        }),
-        select: (_c: string) => ({
-          in: (_col: string, _vals: any[]) => Promise.resolve({ data: [], error: null }),
-        }),
-      }),
-    } as unknown as SupabaseClient;
-
-    const shipper = new Shipper(supabase);
-    const result = await shipper.ship();
-
-    // All 3 are "shipped" (2 discarded as superseded, 1 actually sent)
-    expect(result.shipped).toBe(3);
-    expect(result.failed).toBe(0);
-    // Exactly one actual Supabase call was made
-    expect(shipped.length).toBe(1);
-    expect(outboxDepth()).toBe(0);
-  });
-
   test("blocks events for projIds with failed project registration", async () => {
     enqueue("projects", { id: "proj_fail", name: "Failing Project" });
     enqueue("events", { project_id: "proj_fail", event_type: "msg", event_text: "hi", timestamp: "2025-01-01T00:00:00Z" });
@@ -450,45 +419,6 @@ describe("Shipper.ship()", () => {
     const remaining = dequeueUnshipped(100);
     const blockedEvent = remaining.find(r => r.target === "events" && r.payload.includes("proj_fail"));
     expect(blockedEvent).toBeDefined();
-  });
-
-  test("strips excludeFields from payloads before shipping", async () => {
-    // project_telemetry excludes active_agents and agent_count
-    enqueue("project_telemetry", {
-      project_id: "proj_a",
-      tokens_lifetime: 1000,
-      active_agents: 2,
-      agent_count: 3,
-    });
-
-    const captured: any[] = [];
-    const supabase = {
-      from: (_table: string) => ({
-        upsert: (payload: any, _opts?: any) => {
-          captured.push(Array.isArray(payload) ? payload : [payload]);
-          return Promise.resolve({ data: [], error: null });
-        },
-        update: (payload: any) => ({
-          match: (_f: any) => {
-            captured.push([payload]);
-            return Promise.resolve({ data: [], error: null });
-          },
-        }),
-        select: (_c: string) => ({
-          in: (_col: string, _vals: any[]) => Promise.resolve({ data: [], error: null }),
-        }),
-      }),
-    } as unknown as SupabaseClient;
-
-    const shipper = new Shipper(supabase);
-    await shipper.ship();
-
-    expect(captured.length).toBe(1);
-    const sent = captured[0][0];
-    expect(sent.project_id).toBe("proj_a");
-    expect(sent.tokens_lifetime).toBe(1000);
-    expect(sent.active_agents).toBeUndefined();
-    expect(sent.agent_count).toBeUndefined();
   });
 
   test("returns correct ShipResult counts", async () => {
@@ -582,26 +512,30 @@ describe("Shipper delegation methods", () => {
 describe("SHIPPING_STRATEGIES", () => {
   test("has all expected targets", () => {
     const targets = Object.keys(SHIPPING_STRATEGIES);
+    expect(targets).toContain("sessions");
     expect(targets).toContain("projects");
     expect(targets).toContain("events");
-    expect(targets).toContain("daily_metrics");
-    expect(targets).toContain("project_telemetry");
-    expect(targets).toContain("facility_metrics");
+    expect(targets).toContain("otel_api_requests");
+    expect(targets).toContain("daily_rollups");
+    expect(targets).toContain("alerts");
   });
 
-  test("projects has highest priority (1)", () => {
+  test("does not contain deprecated targets", () => {
+    const targets = Object.keys(SHIPPING_STRATEGIES);
+    expect(targets).not.toContain("daily_metrics");
+    expect(targets).not.toContain("project_telemetry");
+    expect(targets).not.toContain("facility_metrics");
+  });
+
+  test("sessions has highest priority (0)", () => {
+    expect(SHIPPING_STRATEGIES.sessions.priority).toBe(0);
+  });
+
+  test("projects has priority 1", () => {
     expect(SHIPPING_STRATEGIES.projects.priority).toBe(1);
-  });
-
-  test("facility_metrics has lowest priority (99, deprecated)", () => {
-    expect(SHIPPING_STRATEGIES.facility_metrics.priority).toBe(99);
   });
 
   test("events uses ignoreDuplicates", () => {
     expect(SHIPPING_STRATEGIES.events.ignoreDuplicates).toBe(true);
-  });
-
-  test("facility_metrics maps to facility_status table", () => {
-    expect(SHIPPING_STRATEGIES.facility_metrics.table).toBe("facility_status");
   });
 });

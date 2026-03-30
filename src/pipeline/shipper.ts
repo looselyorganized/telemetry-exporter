@@ -74,33 +74,6 @@ export const SHIPPING_STRATEGIES: Record<string, ShippingStrategy> = {
     fallbackToPerRow: true,
     priority: 3,
   },
-  // DEPRECATED — kept until processor stops writing to these targets (Tasks 6-9)
-  daily_metrics: {
-    table: "daily_metrics",
-    method: "upsert",
-    onConflict: "date,project_id",
-    batchSize: 100,
-    fallbackToPerRow: true,
-    priority: 99,
-  },
-  project_telemetry: {
-    table: "project_telemetry",
-    method: "upsert",
-    onConflict: "project_id",
-    excludeFields: ["active_agents", "agent_count"],
-    batchSize: 50,
-    fallbackToPerRow: true,
-    priority: 99,
-  },
-  facility_metrics: {
-    table: "facility_status",
-    method: "update",
-    filter: { id: 1 },
-    excludeFields: ["active_agents", "active_projects", "status"],
-    batchSize: 1,
-    fallbackToPerRow: false,
-    priority: 99,
-  },
 };
 
 // ---------------------------------------------------------------------------
@@ -300,10 +273,7 @@ export class Shipper {
       }
 
       // For project-dependent targets, filter out rows blocked by FK constraint
-      const isProjectDependent =
-        target === "events" ||
-        target === "daily_metrics" ||
-        target === "project_telemetry";
+      const isProjectDependent = target === "events";
 
       if (isProjectDependent && blockedProjIds.size > 0) {
         const { allowed } = filterBlockedByFK(targetRows, blockedProjIds);
@@ -483,38 +453,4 @@ export class Shipper {
     return archiveDepthLocal();
   }
 
-  async verify(lastUpdates: any[]): Promise<void> {
-    if (lastUpdates.length === 0) return;
-
-    const projIds = lastUpdates.map((u) => u.projId).filter(Boolean);
-    if (projIds.length === 0) return;
-
-    const resp = await this.supabase
-      .from("project_telemetry")
-      .select("project_id,tokens_lifetime,sessions_lifetime")
-      .in("project_id", projIds);
-
-    if (resp.error || !resp.data) {
-      console.warn("[shipper:verify] failed to read back project_telemetry:", resp.error?.message);
-      return;
-    }
-
-    const remoteById = new Map<string, any>(
-      (resp.data as any[]).map((r: any) => [r.project_id, r])
-    );
-
-    for (const update of lastUpdates) {
-      const remote = remoteById.get(update.projId);
-      if (!remote) {
-        console.warn(`[shipper:verify] project_telemetry missing for ${update.projId}`);
-        continue;
-      }
-      if (remote.tokens_lifetime !== update.tokensLifetime) {
-        console.warn(
-          `[shipper:verify] tokens_lifetime mismatch for ${update.projId}: ` +
-          `local=${update.tokensLifetime} remote=${remote.tokens_lifetime}`
-        );
-      }
-    }
-  }
 }

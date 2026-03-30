@@ -298,7 +298,6 @@ async function pipelineLoop(): Promise<never> {
         pruneProcessedOtelEvents(7);
         expireStaleOtelEvents(24);
         pruneRateLimits();
-        await shipper.verify([]);
         const depth = shipper.outboxDepth();
         if (depth > 1000) reportError("event_write", `Outbox backlog: ${depth} pending rows`);
         const aDepth = shipper.archiveDepth();

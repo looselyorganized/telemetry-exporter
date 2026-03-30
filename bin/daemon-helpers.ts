@@ -4,50 +4,11 @@
  * that prevent direct import in tests.
  */
 
-import type { LogEntry, ModelStats } from "../src/parsers";
+import type { LogEntry } from "../src/parsers";
 import { formatTokens, type ProjectEventAggregates } from "../src/db/types";
 
 export { formatTokens };
 export type { ProjectEventAggregates };
-
-// ─── Types (shared with daemon.ts) ──────────────────────────────────────────
-
-export interface LifetimeCounters {
-  sessions: number;
-  messages: number;
-  toolCalls: number;
-  agentSpawns: number;
-  teamMessages: number;
-}
-
-export interface TodayTokens {
-  total: number;
-  models: Record<string, number>;
-}
-
-export interface ProjectTelemetryInput {
-  tokensByProject: Record<string, number>;
-  lifetimeCounters: Record<string, LifetimeCounters>;
-  todayTokensByProject: Record<string, TodayTokens>;
-}
-
-// ─── Formatting ─────────────────────────────────────────────────────────────
-
-/** Format model stats array into the JSON shape expected by facility_status / facility_metrics. */
-export function formatModelStats(modelStats: ModelStats[]): Record<string, object> {
-  return Object.fromEntries(
-    modelStats.map((m) => [
-      m.model,
-      {
-        total: m.total,
-        input: m.input,
-        cacheWrite: m.cacheWrite,
-        cacheRead: m.cacheRead,
-        output: m.output,
-      },
-    ])
-  );
-}
 
 // ─── Aggregation ────────────────────────────────────────────────────────────
 
@@ -123,57 +84,6 @@ export function aggregateProjectEvents(
   }
 
   return agg;
-}
-
-/**
- * Build ProjectTelemetryUpdate records from explicit cache data.
- * Decoupled from daemon.ts module state for testability.
- */
-export function buildProjectTelemetryUpdates(
-  caches: ProjectTelemetryInput,
-  agentsByProject?: Record<string, { count: number; active: number }>
-): Array<{
-  projId: string;
-  tokensLifetime: number;
-  tokensToday: number;
-  modelsToday: Record<string, number>;
-  sessionsLifetime: number;
-  messagesLifetime: number;
-  toolCallsLifetime: number;
-  agentSpawnsLifetime: number;
-  teamMessagesLifetime: number;
-  activeAgents: number;
-  agentCount: number;
-}> {
-  const allProjIds = new Set([
-    ...Object.keys(caches.tokensByProject),
-    ...(agentsByProject ? Object.keys(agentsByProject) : []),
-    ...Object.keys(caches.lifetimeCounters),
-    ...Object.keys(caches.todayTokensByProject),
-  ]);
-
-  const emptyCounters: LifetimeCounters = {
-    sessions: 0, messages: 0, toolCalls: 0, agentSpawns: 0, teamMessages: 0,
-  };
-
-  return [...allProjIds].map((projId) => {
-    const counters = caches.lifetimeCounters[projId] ?? emptyCounters;
-    const todayData = caches.todayTokensByProject[projId] ?? { total: 0, models: {} };
-    const agents = agentsByProject?.[projId] ?? { count: 0, active: 0 };
-    return {
-      projId,
-      tokensLifetime: caches.tokensByProject[projId] ?? 0,
-      tokensToday: todayData.total,
-      modelsToday: todayData.models,
-      sessionsLifetime: counters.sessions,
-      messagesLifetime: counters.messages,
-      toolCallsLifetime: counters.toolCalls,
-      agentSpawnsLifetime: counters.agentSpawns,
-      teamMessagesLifetime: counters.teamMessages,
-      activeAgents: agents.active,
-      agentCount: agents.count,
-    };
-  });
 }
 
 /**
