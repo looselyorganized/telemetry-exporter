@@ -68,8 +68,13 @@ import { homedir } from "os";
 const PROJECTS_DIR = join(homedir(), ".claude", "projects");
 const LO_ENCODED_PREFIX = "-Users-bigviking-Documents-github-projects-lo-".toLowerCase();
 
+const loSessionCache = new Map<string, boolean | null>();
+
 function isLOSession(sessionId: string): boolean | null {
+  if (loSessionCache.has(sessionId)) return loSessionCache.get(sessionId)!;
+
   // Check if any .jsonl file matching this sessionId exists under an LO-encoded dir
+  let result: boolean | null = null;
   try {
     for (const dir of readdirSync(PROJECTS_DIR)) {
       const dirPath = join(PROJECTS_DIR, dir);
@@ -93,7 +98,8 @@ function isLOSession(sessionId: string): boolean | null {
       } catch {}
     }
   } catch {}
-  return null; // session file not found yet — leave for retry
+  loSessionCache.set(sessionId, result);
+  return result; // null = session file not found yet — leave for retry
 }
 ```
 
@@ -181,17 +187,16 @@ api_error events are now extracted for downstream processing."
 
 - [ ] **Step 1: Add parent_session_id to SQLite sessions table**
 
-In `src/db/local.ts`, update the sessions CREATE TABLE to include `parent_session_id` and `pid`:
+In `src/db/local.ts`, the sessions table already exists in `telemetry.db`. `CREATE TABLE IF NOT EXISTS` won't add new columns. Use ALTER TABLE in `initLocal()`:
 
-```sql
-CREATE TABLE IF NOT EXISTS sessions (
-  session_id         TEXT PRIMARY KEY,
-  proj_id            TEXT NOT NULL,
-  parent_session_id  TEXT,
-  pid                INTEGER,
-  cwd                TEXT NOT NULL,
-  first_seen         TEXT NOT NULL
-);
+```typescript
+// After the existing CREATE TABLE IF NOT EXISTS sessions ... statement:
+try {
+  db.query("ALTER TABLE sessions ADD COLUMN parent_session_id TEXT").run();
+} catch {} // column already exists
+try {
+  db.query("ALTER TABLE sessions ADD COLUMN pid INTEGER").run();
+} catch {} // column already exists
 ```
 
 Update `upsertSession` to accept optional `parentSessionId`:
@@ -603,7 +608,37 @@ export const SHIPPING_STRATEGIES: Record<string, ShippingStrategy> = {
 };
 ```
 
-Removed: `daily_metrics`, `project_telemetry`, `facility_metrics`.
+Old targets (`daily_metrics`, `project_telemetry`, `facility_metrics`) are kept temporarily so the outbox doesn't reject rows already enqueued before the processor is updated. They'll be removed in Task 10 (dead code cleanup) after the processor stops writing to them.
+
+```typescript
+  // DEPRECATED — kept until processor is updated (Tasks 6-9)
+  daily_metrics: {
+    table: "daily_metrics",
+    method: "upsert",
+    onConflict: "date,project_id",
+    batchSize: 100,
+    fallbackToPerRow: true,
+    priority: 99, // lowest priority — drain old rows
+  },
+  project_telemetry: {
+    table: "project_telemetry",
+    method: "upsert",
+    onConflict: "project_id",
+    excludeFields: ["active_agents", "agent_count"],
+    batchSize: 50,
+    fallbackToPerRow: true,
+    priority: 99,
+  },
+  facility_metrics: {
+    table: "facility_status",
+    method: "update",
+    filter: { id: 1 },
+    excludeFields: ["active_agents", "active_projects", "status"],
+    batchSize: 1,
+    fallbackToPerRow: false,
+    priority: 99,
+  },
+```
 
 - [ ] **Step 2: Run tests**
 
@@ -742,176 +777,184 @@ Keeps otel_api_requests shipping and budget alerts."
 
 ---
 
-### Task 7: Remove old pipeline paths from processor
+### Task 7: Unified daily_rollups accumulator (was Task 8)
+
+NOTE: Old Task 7 (remove processTokens/processMetrics) has been merged into Task 9 to prevent compilation failures.
+
+**CRITICAL DESIGN NOTE:** Both `processOtelBatch()` (tokens/cost) and `processEvents()` (event counts) write to `daily_rollups`. The shipper's upsert on `(project_id, date)` **replaces the entire row**. If tokens and events are enqueued as separate payloads, they overwrite each other.
+
+**Solution:** The processor maintains a per-cycle accumulator (`pendingRollups`) that merges tokens, cost, AND event counts into a single payload per (project_id, date). Only one `daily_rollups` enqueue per project per date per cycle.
 
 **Files:**
 - Modify: `src/pipeline/processor.ts`
 
-- [ ] **Step 1: Remove processTokens method**
-
-Delete the entire `processTokens()` method (~175 lines, lines 160-333) and all supporting state:
-
-Remove from class properties:
-- `tokenBaseline`
-- `lifetimeBaseline`
-- `lastDailySync`
-- `todayTokensTotal`
-- `lastTelemetryPayloads`
-- `otelCoveredPairs`
-
-Remove imports: `computeTokensByProject`, `ProjectTokenMap`, `upsertCostTracking`, `getCostByProject`.
-
-- [ ] **Step 2: Remove processMetrics method**
-
-Delete `processMetrics()` (~50 lines) and `snapshotFacilityState()`.
-
-Remove from class properties: `lastMetricsHash`, `lastSnapshotTime`.
-
-Remove imports: `formatModelStats`, `StatsCache`, `ModelStats`.
-
-- [ ] **Step 3: Remove getStartupMetrics and _loadBaselinesFromSupabase**
-
-Delete both methods. The processor no longer needs Supabase baseline hydration — lifetime is derived from `daily_rollups` via RPC, not maintained as a running counter.
-
-Simplify `hydrate()` to only load known projects:
+- [ ] **Step 1: Add pendingRollups accumulator to Processor class**
 
 ```typescript
-async hydrate(): Promise<void> {
-  this.loadKnownProjects();
+/** Per-cycle accumulator for daily_rollups. Merges tokens, cost, events. */
+private pendingRollups = new Map<string, {
+  project_id: string;
+  date: string;
+  tokens: Record<string, { input: number; cache_read: number; cache_write: number; output: number }>;
+  cost: Record<string, number>;
+  events: Record<string, number>;
+  sessions: number;
+  errors: number;
+}>();
+```
+
+- [ ] **Step 2: Update processOtelBatch to accumulate into pendingRollups instead of enqueuing directly**
+
+Replace the `enqueue("daily_rollups", ...)` call with:
+
+```typescript
+for (const group of dailyGroups.values()) {
+  const key = `${group.projId}\0${group.date}`;
+  let rollup = this.pendingRollups.get(key);
+  if (!rollup) {
+    rollup = { project_id: group.projId, date: group.date, tokens: {}, cost: {}, events: {}, sessions: 0, errors: 0 };
+    this.pendingRollups.set(key, rollup);
+  }
+  // Merge tokens by model (last write wins per model — cost_tracking already accumulated)
+  Object.assign(rollup.tokens, group.models);
+  // Merge cost by model
+  for (const [model, cost] of Object.entries(costByModel)) {
+    rollup.cost[model] = (rollup.cost[model] ?? 0) + cost;
+  }
 }
 ```
 
-Remove `refreshBaselines()`.
-
-- [ ] **Step 4: Run tests**
-
-Run: `cd /Users/bigviking/Documents/github/projects/lo/telemetry-exporter && bun test`
-
-Many tests will break because they test removed methods. Update or remove those test cases.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add src/pipeline/processor.ts src/pipeline/__tests__/processor.test.ts
-git commit -m "refactor(processor): remove processTokens, processMetrics, baseline management
-
-These paths used JSONL token scanning and stats-cache.json which are
-eliminated in the OTel-only architecture. Lifetime tokens are now
-derived from daily_rollups via Supabase RPC."
-```
-
----
-
-### Task 8: Accumulate event counts into daily_rollups
-
-The `processEvents()` method currently enqueues individual events to the `events` table. It also needs to accumulate event type counts into `daily_rollups.events` JSONB so that `get_project_summary` returns event counts.
-
-**Files:**
-- Modify: `src/pipeline/processor.ts`
-
-- [ ] **Step 1: Update processEvents to also enqueue daily_rollups event counts**
-
-After the existing event enqueue loop, add accumulation logic:
+- [ ] **Step 3: Update processEvents to accumulate event counts into pendingRollups**
 
 ```typescript
-// Accumulate event counts per project per date for daily_rollups
-const eventCounts = new Map<string, Record<string, number>>();
 for (const entry of entries) {
   const date = entry.timestamp?.substring(0, 10) ?? new Date().toISOString().substring(0, 10);
   const key = `${entry.projId}\0${date}`;
-  const counts = eventCounts.get(key) ?? {};
-  counts[entry.eventType] = (counts[entry.eventType] ?? 0) + 1;
-  eventCounts.set(key, counts);
-}
-
-for (const [key, counts] of eventCounts) {
-  const [projId, date] = key.split("\0");
-  enqueue("daily_rollups", {
-    project_id: projId,
-    date,
-    events: counts,
-  });
+  let rollup = this.pendingRollups.get(key);
+  if (!rollup) {
+    rollup = { project_id: entry.projId, date, tokens: {}, cost: {}, events: {}, sessions: 0, errors: 0 };
+    this.pendingRollups.set(key, rollup);
+  }
+  rollup.events[entry.eventType] = (rollup.events[entry.eventType] ?? 0) + 1;
 }
 ```
 
-Note: The shipper's upsert on `(project_id, date)` means this will merge with any existing daily_rollups row for that date. However, the `events` JSONB will be **replaced**, not merged. The processor should maintain a running accumulator for the current day's event counts and enqueue the full accumulated JSONB each cycle. Add a `dailyEventCounts` map as a class property.
-
-- [ ] **Step 2: Run tests**
-
-Run: `cd /Users/bigviking/Documents/github/projects/lo/telemetry-exporter && bun test`
-
-- [ ] **Step 3: Commit**
-
-```bash
-git add src/pipeline/processor.ts
-git commit -m "feat(processor): accumulate event counts into daily_rollups events JSONB"
-```
-
----
-
-### Task 9: Clean up daemon.ts and receivers (renumbered from 8)
-
-**Files:**
-- Modify: `bin/daemon.ts`
-- Modify: `src/pipeline/receivers.ts`
-
-- [ ] **Step 1: Remove TokenReceiver and MetricsReceiver from receivers.ts**
-
-Delete the `TokenReceiver` class (lines 87-118) and `MetricsReceiver` class (lines 124-141). Keep `LogReceiver` intact — it's still used for events.log tailing.
-
-Remove imports: `scanProjectTokens`, `ProjectTokenMap`, `ProjectResolver`, `otelEventsReceivedSince`, `readStatsCache`, `readModelStats`.
-
-Remove export of `MetricsSnapshot` type.
-
-- [ ] **Step 2: Update daemon.ts pipeline loop**
-
-Remove from the pipeline loop:
+- [ ] **Step 4: Add flushRollups method called at end of each pipeline cycle**
 
 ```typescript
-// DELETE these lines:
-let tokenMap: import("../src/project/scanner").ProjectTokenMap = new Map();
-try { tokenMap = tokenReceiver.poll(); } catch (e) { ... }
-
-let metrics: import("../src/pipeline/receivers").MetricsSnapshot = { ... };
-try { metrics = metricsReceiver.poll(); } catch (e) { ... }
-
-processor.processTokens(tokenMap);
-processor.processMetrics(metrics.statsCache, metrics.modelStats);
+/** Flush accumulated daily_rollups to outbox. Call once per pipeline cycle. */
+flushRollups(): void {
+  for (const [key, rollup] of this.pendingRollups) {
+    const json = JSON.stringify(rollup);
+    if (this.lastDailyPayloads.get(key) === json) continue;
+    this.lastDailyPayloads.set(key, json);
+    enqueue("daily_rollups", rollup);
+  }
+  this.pendingRollups.clear();
+}
 ```
 
-Remove `tokenReceiver` and `metricsReceiver` instantiation from startup.
-
-- [ ] **Step 3: Refresh session registry every cycle instead of every 5 minutes**
-
-In `bin/daemon.ts`, move `refreshRegistry(resolver)` from the `cycle % 60 === 0` block to the main loop body:
+This is called from `daemon.ts` after both `processEvents()` and `processOtelBatch()`:
 
 ```typescript
-// Every cycle: refresh session registry (cheap readdirSync)
-refreshRegistry(resolver);
+if (newEntries.length > 0) processor.processEvents(newEntries);
+// ... OTel processing ...
+processor.flushRollups(); // single enqueue per (project, date)
 ```
 
-- [ ] **Step 4: Remove startup processTokens/processMetrics calls**
-
-Remove from the startup sequence (around line 198-200):
-
-```typescript
-// DELETE:
-const initialTokenMap = tokenReceiver.poll();
-processor.processTokens(initialTokenMap);
-processor.processMetrics(readStatsCache(), readModelStats());
-```
-
-Also remove `processor.refreshBaselines()` from the maintenance block.
-
-- [ ] **Step 5: Run full test suite**
+- [ ] **Step 5: Run tests**
 
 Run: `cd /Users/bigviking/Documents/github/projects/lo/telemetry-exporter && bun test`
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add bin/daemon.ts src/pipeline/receivers.ts
-git commit -m "refactor(daemon): remove JSONL/metrics receivers, refresh registry every cycle"
+git add src/pipeline/processor.ts bin/daemon.ts
+git commit -m "feat(processor): unified daily_rollups accumulator prevents upsert collision
+
+Tokens/cost (from OTel) and event counts (from events.log) are merged
+into a single payload per (project_id, date) before enqueuing. Prevents
+the shipper's upsert from overwriting tokens with events or vice versa."
+```
+
+---
+
+### Task 9: Remove old pipeline paths (processor + daemon + receivers together)
+
+**IMPORTANT:** Task 7 removes methods from processor.ts and this task removes the calls from daemon.ts. These MUST be done together or the daemon won't compile.
+
+**Files:**
+- Modify: `src/pipeline/processor.ts`
+- Modify: `bin/daemon.ts`
+- Modify: `src/pipeline/receivers.ts`
+
+- [ ] **Step 1: Remove processTokens, processMetrics, baselines from processor.ts**
+
+Delete the following methods entirely:
+- `processTokens()` (~175 lines)
+- `processMetrics()` (~50 lines)
+- `getStartupMetrics()` (~15 lines)
+- `snapshotFacilityState()` (~15 lines)
+- `_loadBaselinesFromSupabase()` (~55 lines)
+- `refreshBaselines()` (~5 lines)
+
+Remove from class properties:
+- `tokenBaseline`, `lifetimeBaseline`, `lastDailySync`, `todayTokensTotal`
+- `lastTelemetryPayloads`, `otelCoveredPairs`, `lastMetricsHash`, `lastSnapshotTime`
+
+Remove imports: `computeTokensByProject`, `ProjectTokenMap`, `upsertCostTracking`, `getCostByProject`, `formatModelStats`, `StatsCache`, `ModelStats`.
+
+Simplify `hydrate()`:
+```typescript
+async hydrate(): Promise<void> {
+  this.loadKnownProjects();
+}
+```
+
+- [ ] **Step 2: Remove TokenReceiver and MetricsReceiver from receivers.ts**
+
+Delete the `TokenReceiver` class (lines 87-118) and `MetricsReceiver` class (lines 124-141). Keep `LogReceiver` intact.
+
+Remove imports: `scanProjectTokens`, `ProjectTokenMap`, `ProjectResolver`, `otelEventsReceivedSince`, `readStatsCache`, `readModelStats`.
+
+- [ ] **Step 3: Update daemon.ts — remove all old calls**
+
+Remove from the pipeline loop:
+```typescript
+// DELETE these lines:
+let tokenMap = ...; tokenReceiver.poll(); ...
+let metrics = ...; metricsReceiver.poll(); ...
+processor.processTokens(tokenMap);
+processor.processMetrics(metrics.statsCache, metrics.modelStats);
+```
+
+Remove `tokenReceiver` and `metricsReceiver` instantiation from startup.
+
+Remove startup `processTokens`/`processMetrics` calls.
+
+Remove `processor.refreshBaselines()` and `processor.snapshotFacilityState()` from maintenance block.
+
+Move `refreshRegistry(resolver)` from maintenance block to every cycle:
+```typescript
+// Every cycle: refresh session registry (cheap readdirSync)
+refreshRegistry(resolver);
+```
+
+- [ ] **Step 4: Run full test suite**
+
+Run: `cd /Users/bigviking/Documents/github/projects/lo/telemetry-exporter && bun test`
+
+Many tests will fail because they test removed methods. Remove or update those test cases.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add src/pipeline/processor.ts src/pipeline/receivers.ts bin/daemon.ts src/pipeline/__tests__/
+git commit -m "refactor: remove JSONL token scanning, metrics receivers, baseline management
+
+Removes processTokens, processMetrics, TokenReceiver, MetricsReceiver,
+and all baseline hydration. OTel is now the sole token/cost source.
+Session registry refreshes every cycle (5s) instead of every 5 minutes."
 ```
 
 ---
