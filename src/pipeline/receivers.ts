@@ -2,18 +2,13 @@
  * Receiver adapters — thin wrappers that connect existing parsers to the
  * pipeline by adding cursor persistence.
  *
- * LogReceiver:     LogTailer + SQLite cursor (getCursor/setCursor)
- * TokenReceiver:   scanProjectTokens wrapper
- * MetricsReceiver: readStatsCache + readModelStats wrapper
+ * LogReceiver: LogTailer + SQLite cursor (getCursor/setCursor)
  */
 
 import { statSync } from "fs";
-import { initLocal, getCursor, setCursor, otelEventsReceivedSince } from "../db/local";
-import { LogTailer, readStatsCache, readModelStats } from "../parsers";
-import type { LogEntry, StatsCache, ModelStats } from "../parsers";
-import { scanProjectTokens } from "../project/scanner";
-import type { ProjectTokenMap } from "../project/scanner";
-import type { ProjectResolver } from "../project/resolver";
+import { initLocal, getCursor, setCursor } from "../db/local";
+import { LogTailer } from "../parsers";
+import type { LogEntry } from "../parsers";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -77,64 +72,5 @@ export class LogReceiver {
 
   private persistCursor(offset: number): void {
     setCursor(CURSOR_SOURCE, offset, String(offset));
-  }
-}
-
-// ---------------------------------------------------------------------------
-// TokenReceiver
-// ---------------------------------------------------------------------------
-
-export class TokenReceiver {
-  private lastFallbackLog = 0;
-
-  constructor(private resolver: ProjectResolver) {}
-
-  /**
-   * Poll JSONL token data. Gated by OTel activity — only runs if
-   * no OTel events have been received in the last 5 minutes.
-   * Returns empty map when OTel data is flowing.
-   */
-  poll(): ProjectTokenMap {
-    const recentOtelEvents = otelEventsReceivedSince(300);
-
-    if (recentOtelEvents > 0) {
-      return new Map();
-    }
-
-    // Fallback: no OTel events received recently, JSONL scanning active
-    const now = Date.now();
-    if (now - this.lastFallbackLog > 60_000) {
-      console.log("  JSONL fallback: no OTel events in last 5 minutes");
-      this.lastFallbackLog = now;
-    }
-
-    return scanProjectTokens(this.resolver);
-  }
-
-  readAll(): ProjectTokenMap {
-    // Always scan all for backfill — skip coverage check
-    return scanProjectTokens(this.resolver);
-  }
-}
-
-// ---------------------------------------------------------------------------
-// MetricsReceiver
-// ---------------------------------------------------------------------------
-
-export interface MetricsSnapshot {
-  statsCache: StatsCache | null;
-  modelStats: ModelStats[];
-}
-
-export class MetricsReceiver {
-  poll(): MetricsSnapshot {
-    return {
-      statsCache: readStatsCache(),
-      modelStats: readModelStats(),
-    };
-  }
-
-  readAll(): MetricsSnapshot {
-    return this.poll();
   }
 }

@@ -15,7 +15,7 @@
  * launchd owns the lifecycle — starts on boot, restarts on crash.
  */
 
-import { LOG_FILE, readStatsCache, readModelStats } from "../src/parsers";
+import { LOG_FILE } from "../src/parsers";
 import { initSupabase, getSupabase } from "../src/db/client";
 import { setFacilitySwitch } from "../src/db/facility";
 import { pushAgentState } from "../src/db/agent-state";
@@ -29,7 +29,7 @@ import { initLocal, getLocal, closeLocal, purgeFailed, pruneProcessedOtelEvents,
 import { startOtlpServer, stopOtlpServer, pruneRateLimits } from "../src/otel/server";
 import { buildSessionRegistry, refreshRegistry } from "../src/otel/session-registry";
 import { OtelReceiver } from "../src/pipeline/otel-receiver";
-import { LogReceiver, TokenReceiver, MetricsReceiver } from "../src/pipeline/receivers";
+import { LogReceiver } from "../src/pipeline/receivers";
 import { Processor } from "../src/pipeline/processor";
 import { Shipper } from "../src/pipeline/shipper";
 import { pruneOldEvents } from "../src/db/events";
@@ -135,8 +135,6 @@ const sessionCount = buildSessionRegistry(resolver);
 console.log(`  Session registry: ${sessionCount} sessions mapped from ~/.claude/projects/`);
 
 const logReceiver = new LogReceiver(LOG_FILE, DB_PATH);
-const tokenReceiver = new TokenReceiver(resolver);
-const metricsReceiver = new MetricsReceiver();
 const otelReceiver = new OtelReceiver();
 const processor = new Processor(resolver, getLocal());
 const shipper = new Shipper(getSupabase());
@@ -164,7 +162,7 @@ async function detectAndFillGap(): Promise<void> {
     : allEntries;
   console.log(`  Found ${gapEntries.length} events in the gap (of ${allEntries.length} total)`);
 
-  processor.processGapEntries(gapEntries, tokenReceiver.poll(), readStatsCache(), readModelStats());
+  if (gapEntries.length > 0) processor.processEvents(gapEntries);
   console.log(`  Gap backfill: ${gapEntries.length} entries queued for shipping`);
 }
 
@@ -177,7 +175,7 @@ async function runBackfill(): Promise<void> {
   const deleted = await deleteProjectDailyMetrics();
   console.log(`  Deleted ${deleted} stale per-project daily_metrics rows`);
 
-  processor.processGapEntries(allEntries, tokenReceiver.poll(), readStatsCache(), readModelStats());
+  if (allEntries.length > 0) processor.processEvents(allEntries);
   console.log(`  Backfill: ${allEntries.length} entries queued`);
 
   let totalShipped = 0;
@@ -196,24 +194,7 @@ if (IS_BACKFILL) {
   console.log("Reading log file...");
   await detectAndFillGap();
 
-  const initialTokenMap = tokenReceiver.poll();
-  processor.processTokens(initialTokenMap);
-  processor.processMetrics(readStatsCache(), readModelStats());
-
-  const startupMetrics = processor.getStartupMetrics();
-  if (startupMetrics) {
-    const { error } = await getSupabase()
-      .from("facility_status")
-      .update(startupMetrics)
-      .eq("id", 1);
-    if (error) {
-      console.warn(`  Startup sync failed: ${error.message}`);
-    } else {
-      console.log(`  Startup sync: pushed tokens_today=${startupMetrics.tokens_today} directly`);
-    }
-  }
-
-  // Drain any outbox rows from gap detection or startup processing
+  // Drain any outbox rows from gap detection
   let startupShipped = 0;
   while (shipper.outboxDepth() > 0) {
     startupShipped += (await shipper.ship()).shipped;
@@ -269,20 +250,15 @@ let cycle = 0;
 async function pipelineLoop(): Promise<never> {
   while (true) {
     try {
+      // Refresh session registry every cycle (5s) so new sessions are resolved quickly
+      refreshRegistry(resolver);
+
       // Collect (each receiver in its own try/catch)
       let newEntries: import("../src/parsers").LogEntry[] = [];
       try { newEntries = logReceiver.poll(); } catch (e) { reportError("event_write", `logReceiver: ${errMsg(e)}`); }
 
-      let tokenMap: import("../src/project/scanner").ProjectTokenMap = new Map();
-      try { tokenMap = tokenReceiver.poll(); } catch (e) { reportError("metrics_sync", `tokenReceiver: ${errMsg(e)}`); }
-
-      let metrics: import("../src/pipeline/receivers").MetricsSnapshot = { statsCache: null, modelStats: [] };
-      try { metrics = metricsReceiver.poll(); } catch (e) { reportError("metrics_sync", `metricsReceiver: ${errMsg(e)}`); }
-
       // Process -> SQLite outbox
       if (newEntries.length > 0) processor.processEvents(newEntries);
-      processor.processTokens(tokenMap);
-      processor.processMetrics(metrics.statsCache, metrics.modelStats);
 
       // OTel pipeline: poll unprocessed events, process into outbox
       try {
@@ -317,15 +293,6 @@ async function pipelineLoop(): Promise<never> {
         }
 
         await processor.refreshResolver();
-        refreshRegistry(resolver);
-        await processor.refreshBaselines();
-        if (new Date().getMinutes() < 1) {
-          processor.snapshotFacilityState({
-            status: watcher.activeAgents > 0 ? "active" : "dormant",
-            activeAgents: watcher.activeAgents,
-            activeProjects: [],
-          });
-        }
         shipper.pruneShipped(7);
         shipper.pruneShippedArchive(7);
         pruneProcessedOtelEvents(7);

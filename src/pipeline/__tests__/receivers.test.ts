@@ -4,8 +4,7 @@ import { tmpdir } from "os";
 import { join } from "path";
 import { Database } from "bun:sqlite";
 import { initLocal, closeLocal, getCursor } from "../../db/local";
-import { LogReceiver, TokenReceiver, MetricsReceiver } from "../receivers";
-import type { ProjectResolver, ResolvedProject } from "../../project/resolver";
+import { LogReceiver } from "../receivers";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -115,90 +114,5 @@ describe("LogReceiver", () => {
     expect(() => receiver.readAll()).not.toThrow();
     const entries = receiver.readAll();
     expect(entries).toEqual([]);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// TokenReceiver — thin wrapper; just verify shape and no crash
-// ---------------------------------------------------------------------------
-
-describe("TokenReceiver", () => {
-  test("poll returns a Map (ProjectTokenMap shape) without crashing", () => {
-    // Use a minimal mock resolver so scanProjectTokens won't hit real disk
-    const mockResolver: ProjectResolver = {
-      resolve(_dirName: string): ResolvedProject | null {
-        return null;
-      },
-      async refresh(): Promise<void> {},
-      entries(): IterableIterator<[string, ResolvedProject]> {
-        return new Map<string, ResolvedProject>().entries();
-      },
-      stats() {
-        return { total: 0, fromLoYml: 0, fromNameCache: 0 };
-      },
-    };
-
-    const receiver = new TokenReceiver(mockResolver);
-    expect(() => receiver.poll()).not.toThrow();
-    const result = receiver.poll();
-    expect(result).toBeInstanceOf(Map);
-  });
-
-  test("readAll returns same shape as poll", () => {
-    const mockResolver: ProjectResolver = {
-      resolve(_dirName: string): ResolvedProject | null {
-        return null;
-      },
-      async refresh(): Promise<void> {},
-      entries(): IterableIterator<[string, ResolvedProject]> {
-        return new Map<string, ResolvedProject>().entries();
-      },
-      stats() {
-        return { total: 0, fromLoYml: 0, fromNameCache: 0 };
-      },
-    };
-
-    const receiver = new TokenReceiver(mockResolver);
-    const pollResult = receiver.poll();
-    const readAllResult = receiver.readAll();
-    expect(readAllResult).toBeInstanceOf(Map);
-    // Both return same type (Maps with same size for same resolver state)
-    expect(readAllResult.size).toBe(pollResult.size);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// MetricsReceiver — thin wrapper; just verify shape and no crash
-// ---------------------------------------------------------------------------
-
-describe("MetricsReceiver", () => {
-  test("poll returns object with statsCache and modelStats keys", () => {
-    const receiver = new MetricsReceiver();
-    expect(() => receiver.poll()).not.toThrow();
-    const result = receiver.poll();
-    expect(result).toHaveProperty("statsCache");
-    expect(result).toHaveProperty("modelStats");
-  });
-
-  test("modelStats is always an array", () => {
-    const receiver = new MetricsReceiver();
-    const result = receiver.poll();
-    expect(Array.isArray(result.modelStats)).toBe(true);
-  });
-
-  test("statsCache is null or an object (graceful when file absent)", () => {
-    const receiver = new MetricsReceiver();
-    const result = receiver.poll();
-    // When ~/.claude/stats-cache.json doesn't exist, readStatsCache returns null
-    expect(result.statsCache === null || typeof result.statsCache === "object").toBe(true);
-  });
-
-  test("readAll returns same result as poll", () => {
-    const receiver = new MetricsReceiver();
-    const pollResult = receiver.poll();
-    const readAllResult = receiver.readAll();
-    expect(readAllResult).toHaveProperty("statsCache");
-    expect(readAllResult).toHaveProperty("modelStats");
-    expect(Array.isArray(readAllResult.modelStats)).toBe(true);
   });
 });
