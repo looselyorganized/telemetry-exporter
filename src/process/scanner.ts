@@ -20,6 +20,7 @@ export interface ClaudeProcess {
   projId: string;
   isActive: boolean;
   model: string;
+  sessionId: string | null;
 }
 
 const projectNameCache = new Map<string, string>();
@@ -81,6 +82,42 @@ function execQuiet(cmd: string): string | null {
 /** Clear the project name cache (useful for testing). */
 export function clearProjectNameCache(): void {
   projectNameCache.clear();
+}
+
+/** PID→session cache (immutable for PID lifetime). */
+const pidSessionCache = new Map<number, string | null>();
+
+/**
+ * Resolve a Claude PID to its session_id by finding
+ * the open ~/.claude/tasks/<session_id>/ directory handle.
+ */
+export function resolveSessionId(pid: number): string | null {
+  if (pidSessionCache.has(pid)) return pidSessionCache.get(pid)!;
+
+  const output = execQuiet(`lsof -p ${pid} 2>/dev/null`);
+  if (!output) {
+    pidSessionCache.set(pid, null);
+    return null;
+  }
+
+  for (const line of output.split("\n")) {
+    const match = line.match(
+      /\.claude\/tasks\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i,
+    );
+    if (match) {
+      const sessionId = match[1];
+      pidSessionCache.set(pid, sessionId);
+      return sessionId;
+    }
+  }
+
+  pidSessionCache.set(pid, null);
+  return null;
+}
+
+/** Clear PID→session cache for closed PIDs. */
+export function clearPidSession(pid: number): void {
+  pidSessionCache.delete(pid);
 }
 
 /** Parse Claude processes from ps output. */
@@ -175,6 +212,7 @@ export function scanProcesses(): ClaudeProcess[] {
       projId: deriveProjId(cwd),
       isActive: p.cpu > 1 || cafPids.has(p.pid),
       model: "",
+      sessionId: resolveSessionId(p.pid),
     };
   });
 }

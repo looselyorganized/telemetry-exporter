@@ -11,7 +11,7 @@
  * going active only needs the window to cross threshold plus 3 ticks.
  */
 
-import { getFacilityState } from "./scanner";
+import { getFacilityState, clearPidSession } from "./scanner";
 
 /** How many recent ticks to consider (at 250ms each, 40 = 10 seconds). */
 const WINDOW_SIZE = 40;
@@ -151,6 +151,7 @@ export class ProcessWatcher {
         this.activityWindow.delete(pid);
         this.reportedActive.delete(pid);
         this.confirmationCount.delete(pid);
+        clearPidSession(pid);
       }
     }
 

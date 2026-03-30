@@ -30,6 +30,7 @@ function makeProcess(overrides: Partial<ClaudeProcess> = {}): ClaudeProcess {
     projId: "proj",
     isActive: false,
     model: "",
+    sessionId: null,
     ...overrides,
   };
 }
