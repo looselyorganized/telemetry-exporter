@@ -140,6 +140,7 @@ BEGIN
       jsonb_build_object(
         'tokens', jsonb_build_object(
           'total', COALESCE(pt.total_tokens, 0),
+          'billable', COALESCE(pt.total_tokens - pt.total_cache_read, 0),
           'input', COALESCE(pt.total_input, 0),
           'output', COALESCE(pt.total_output, 0),
           'cache_read', COALESCE(pt.total_cache_read, 0),
@@ -165,6 +166,7 @@ BEGIN
     'facility', jsonb_build_object(
       'tokens', jsonb_build_object(
         'total', COALESCE((SELECT SUM(total_tokens) FROM project_tokens), 0),
+        'billable', COALESCE((SELECT SUM(total_tokens - total_cache_read) FROM project_tokens), 0),
         'input', COALESCE((SELECT SUM(total_input) FROM project_tokens), 0),
         'output', COALESCE((SELECT SUM(total_output) FROM project_tokens), 0),
         'cache_read', COALESCE((SELECT SUM(total_cache_read) FROM project_tokens), 0),
