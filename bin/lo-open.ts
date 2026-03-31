@@ -26,7 +26,8 @@ import {
   warn,
   abort,
   printOpenBanner,
-  isProcessRunning,
+  isExporterProcess,
+  parsePidFile,
   loadEnv,
 } from "../src/cli-output";
 
@@ -202,12 +203,12 @@ function checkOtelEnv(): void {
 
 function checkExporter(): number {
   if (existsSync(PID_FILE)) {
-    const pid = parseInt(readFileSync(PID_FILE, "utf-8").trim(), 10);
-    if (!isNaN(pid) && isProcessRunning(pid)) {
-      pass("Exporter", `Running (PID ${pid})`);
-      return pid;
+    const existing = parsePidFile(readFileSync(PID_FILE, "utf-8"));
+    if (existing && isExporterProcess(existing.pid)) {
+      pass("Exporter", `Running (PID ${existing.pid})`);
+      return existing.pid;
     }
-    // Stale PID file
+    // Stale PID file — not a bun process or dead
     try { unlinkSync(PID_FILE); } catch {}
   }
 

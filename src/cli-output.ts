@@ -6,6 +6,7 @@
  */
 
 import { readFileSync, existsSync } from "fs";
+import { execFileSync } from "child_process";
 import { join } from "path";
 
 // ─── Paths ──────────────────────────────────────────────────────────────────
@@ -140,6 +141,45 @@ export function isProcessRunning(pid: number): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * Check if a PID belongs to an exporter process (bun), not a recycled PID.
+ * Returns false if the process doesn't exist or isn't a bun process.
+ */
+export function isExporterProcess(pid: number): boolean {
+  if (!isProcessRunning(pid)) return false;
+  try {
+    const comm = execFileSync("ps", ["-o", "comm=", "-p", String(pid)], {
+      encoding: "utf-8",
+      timeout: 2000,
+    }).trim();
+    return comm.includes("bun");
+  } catch {
+    return false;
+  }
+}
+
+/** JSON format for enriched PID file. */
+export interface PidFileContents {
+  pid: number;
+  startedAt: string;
+}
+
+/** Parse a PID file — supports JSON format and bare-integer legacy format. */
+export function parsePidFile(content: string): PidFileContents | null {
+  const trimmed = content.trim();
+  // Try JSON first
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (typeof parsed.pid === "number" && typeof parsed.startedAt === "string") {
+      return parsed as PidFileContents;
+    }
+  } catch {}
+  // Fallback: bare integer (backward compat)
+  const pid = parseInt(trimmed, 10);
+  if (!isNaN(pid)) return { pid, startedAt: "" };
+  return null;
 }
 
 /**

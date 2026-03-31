@@ -25,17 +25,17 @@ export type { ShipResult, ShippingStrategy } from "../db/types";
 // ---------------------------------------------------------------------------
 
 export const SHIPPING_STRATEGIES: Record<string, ShippingStrategy> = {
-  // Sessions must ship before otel_api_requests (FK dependency)
-  sessions: {
-    table: "sessions",
+  // Projects must ship first — FK parent for sessions, events, daily_rollups, etc.
+  projects: {
+    table: "projects",
     method: "upsert",
     onConflict: "id",
     batchSize: 50,
     fallbackToPerRow: true,
     priority: 0,
   },
-  projects: {
-    table: "projects",
+  sessions: {
+    table: "sessions",
     method: "upsert",
     onConflict: "id",
     batchSize: 50,
@@ -147,6 +147,19 @@ export function groupByTarget(rows: OutboxRow[]): Map<string, OutboxRow[]> {
   }
   return map;
 }
+
+// ---------------------------------------------------------------------------
+// FK dependency tracking
+// ---------------------------------------------------------------------------
+
+/** All targets whose rows have project_id referencing projects(id). */
+const PROJECT_DEPENDENT_TARGETS = new Set([
+  "sessions",
+  "events",
+  "otel_api_requests",
+  "daily_rollups",
+  "alerts",
+]);
 
 // ---------------------------------------------------------------------------
 // Helper: sortByPriority
@@ -273,7 +286,7 @@ export class Shipper {
       }
 
       // For project-dependent targets, filter out rows blocked by FK constraint
-      const isProjectDependent = target === "events";
+      const isProjectDependent = PROJECT_DEPENDENT_TARGETS.has(target);
 
       if (isProjectDependent && blockedProjIds.size > 0) {
         const { allowed } = filterBlockedByFK(targetRows, blockedProjIds);

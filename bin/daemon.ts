@@ -24,7 +24,7 @@ import { getFacilityState } from "../src/process/scanner";
 import { ProjectResolver } from "../src/project/resolver";
 import { reportError, clearErrors } from "../src/errors";
 import { flushErrors, pruneResolved, clearErrorsTable } from "../src/db/errors";
-import { PID_FILE, isProcessRunning } from "../src/cli-output";
+import { PID_FILE, isExporterProcess, parsePidFile } from "../src/cli-output";
 import { initLocal, getLocal, closeLocal, purgeFailed, pruneProcessedOtelEvents, expireStaleOtelEvents, otelEventsReceivedSince, otelActiveSessionCount, otelQueueDepth } from "../src/db/local";
 import { startOtlpServer, stopOtlpServer, pruneRateLimits } from "../src/otel/server";
 import { buildSessionRegistry, refreshRegistry } from "../src/otel/session-registry";
@@ -53,18 +53,28 @@ if (!SUPABASE_URL || !SUPABASE_KEY) {
 // ─── Single-instance guard (PID file, atomic creation) ──────────────────────
 function removePidFile(): void { try { unlinkSync(PID_FILE); } catch {} }
 
+const STUCK_PROCESS_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+const pidJson = JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString() });
+
 try {
-  writeFileSync(PID_FILE, String(process.pid), { flag: "wx" });
+  writeFileSync(PID_FILE, pidJson, { flag: "wx" });
 } catch {
   if (existsSync(PID_FILE)) {
-    const existingPid = parseInt(readFileSync(PID_FILE, "utf-8").trim(), 10);
-    if (!isNaN(existingPid) && isProcessRunning(existingPid) && existingPid !== process.pid) {
-      console.error(`Another exporter is already running (PID ${existingPid}).`);
-      console.error(`If this is stale, remove ${PID_FILE} and retry.`);
-      process.exit(1);
+    const existing = parsePidFile(readFileSync(PID_FILE, "utf-8"));
+    if (existing && existing.pid !== process.pid && isExporterProcess(existing.pid)) {
+      // Genuine running exporter — check for stuck process (>24h)
+      const age = existing.startedAt ? Date.now() - new Date(existing.startedAt).getTime() : 0;
+      if (age < STUCK_PROCESS_MAX_AGE_MS) {
+        console.error(`Another exporter is already running (PID ${existing.pid}).`);
+        console.error(`If this is stale, remove ${PID_FILE} and retry.`);
+        process.exit(1);
+      }
+      console.warn(`Recovering from stuck exporter (PID ${existing.pid}, started ${existing.startedAt}).`);
+    } else if (existing) {
+      console.warn(`Recovering stale PID file (was PID ${existing.pid}).`);
     }
   }
-  writeFileSync(PID_FILE, String(process.pid));
+  writeFileSync(PID_FILE, pidJson);
 }
 
 // ─── Signal handlers ────────────────────────────────────────────────────────
@@ -224,7 +234,7 @@ async function watcherLoop(): Promise<never> {
       const state = getFacilityState();
       const diff = watcher.tick();
       if (diff) {
-        await pushAgentState(diff, state.processes);
+        await pushAgentState(diff, state.processes, (projId) => processor.hasProject(projId));
         for (const event of diff.events) {
           console.log(`  ${new Date().toLocaleTimeString()} [${event.type}] ${event.project} (pid ${event.pid})`);
         }

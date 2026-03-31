@@ -2,6 +2,8 @@ import { describe, test, expect, beforeEach, afterEach, spyOn } from "bun:test";
 import { mkdtempSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
+import { parsePidFile } from "../cli-output";
+import type { PidFileContents } from "../cli-output";
 
 // loadEnv reads from ENV_FILE which is derived from import.meta.url.
 // We can't easily redirect it to a temp dir without mocking.
@@ -76,5 +78,46 @@ describe("loadEnv (.env parsing)", () => {
     expect(result.SUPABASE_URL).toBe("https://abc.supabase.co");
     expect(result.SUPABASE_SECRET_KEY).toBe("test-secret-key-placeholder-not-real");
     expect(result.LO_PROJECT_ROOT).toBe("/Users/me/projects/lo");
+  });
+});
+
+describe("parsePidFile", () => {
+  test("parses JSON format", () => {
+    const result = parsePidFile('{"pid":12345,"startedAt":"2026-03-31T10:00:00.000Z"}');
+    expect(result).toEqual({ pid: 12345, startedAt: "2026-03-31T10:00:00.000Z" });
+  });
+
+  test("parses bare integer (legacy format)", () => {
+    const result = parsePidFile("12345");
+    expect(result).toEqual({ pid: 12345, startedAt: "" });
+  });
+
+  test("parses bare integer with trailing newline", () => {
+    const result = parsePidFile("12345\n");
+    expect(result).toEqual({ pid: 12345, startedAt: "" });
+  });
+
+  test("returns null for empty string", () => {
+    expect(parsePidFile("")).toBeNull();
+  });
+
+  test("returns null for garbage content", () => {
+    expect(parsePidFile("not-a-pid")).toBeNull();
+  });
+
+  test("returns null for JSON missing pid field", () => {
+    expect(parsePidFile('{"startedAt":"2026-03-31T10:00:00.000Z"}')).toBeNull();
+  });
+
+  test("returns null for JSON with wrong types", () => {
+    expect(parsePidFile('{"pid":"not-a-number","startedAt":"2026-03-31T10:00:00.000Z"}')).toBeNull();
+  });
+
+  test("legacy format produces falsy startedAt for safe age check", () => {
+    const result = parsePidFile("99999");
+    expect(result).not.toBeNull();
+    // Empty string is falsy — daemon.ts uses `existing.startedAt ? ... : 0`
+    // to safely treat legacy files as "not stuck"
+    expect(result!.startedAt).toBeFalsy();
   });
 });

@@ -17,6 +17,7 @@ const knownSessions = new Set<string>();
 export async function pushAgentState(
   diff: ProcessDiff,
   processes: ClaudeProcess[],
+  isProjectRegistered?: (projId: string) => boolean,
 ): Promise<void> {
   const now = new Date().toISOString();
   const writes: Promise<unknown>[] = [];
@@ -49,6 +50,7 @@ export async function pushAgentState(
     // For all other events, look up the current process
     const proc = procByPid.get(event.pid);
     if (!proc?.sessionId || proc.projId === "unknown") continue;
+    if (isProjectRegistered && !isProjectRegistered(proc.projId)) continue;
 
     if (event.type === "instance:created") {
       knownSessions.add(proc.sessionId);

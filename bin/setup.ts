@@ -28,6 +28,7 @@ import {
   warn,
   abort,
   isProcessRunning,
+  parsePidFile,
   loadEnv,
 } from "../src/cli-output";
 
@@ -52,16 +53,16 @@ async function main(): Promise<void> {
 
   // 3. Kill any manually-running daemon (from `bun run start` in a terminal)
   if (existsSync(PID_FILE)) {
-    const pid = parseInt(readFileSync(PID_FILE, "utf-8").trim(), 10);
-    if (!isNaN(pid) && isProcessRunning(pid)) {
-      console.log(`  ${DIM}Stopping manually-running daemon (PID ${pid})...${RESET}`);
-      process.kill(pid, "SIGTERM");
+    const existing = parsePidFile(readFileSync(PID_FILE, "utf-8"));
+    if (existing && isProcessRunning(existing.pid)) {
+      console.log(`  ${DIM}Stopping manually-running daemon (PID ${existing.pid})...${RESET}`);
+      process.kill(existing.pid, "SIGTERM");
       await Bun.sleep(2000);
-      if (isProcessRunning(pid)) {
-        process.kill(pid, "SIGKILL");
+      if (isProcessRunning(existing.pid)) {
+        process.kill(existing.pid, "SIGKILL");
         await Bun.sleep(500);
       }
-      pass("Daemon", `Stopped manual instance (PID ${pid})`);
+      pass("Daemon", `Stopped manual instance (PID ${existing.pid})`);
     }
     try { unlinkSync(PID_FILE); } catch {}
   }
@@ -107,9 +108,9 @@ async function main(): Promise<void> {
     waited += POLL_INTERVAL;
 
     if (existsSync(PID_FILE)) {
-      const pid = parseInt(readFileSync(PID_FILE, "utf-8").trim(), 10);
-      if (!isNaN(pid) && isProcessRunning(pid)) {
-        pass("Daemon", `Running (PID ${pid}, started after ${waited}ms)`);
+      const started = parsePidFile(readFileSync(PID_FILE, "utf-8"));
+      if (started && isProcessRunning(started.pid)) {
+        pass("Daemon", `Running (PID ${started.pid}, started after ${waited}ms)`);
 
         console.log();
         console.log(`  ${DIM}── Setup Complete ─────────────────────${RESET}`);

@@ -72,6 +72,11 @@ export class Processor {
     this.knownProjects = new Set<string>();
   }
 
+  /** Check if a project has been registered (enqueued to outbox). */
+  hasProject(projId: string): boolean {
+    return this.knownProjects.has(projId);
+  }
+
   /** Load known_projects from SQLite into in-memory Set. */
   loadKnownProjects(): void {
     const ids = getKnownProjectIds();

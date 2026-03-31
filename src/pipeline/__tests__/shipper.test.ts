@@ -146,7 +146,7 @@ describe("groupByTarget", () => {
 // ---------------------------------------------------------------------------
 
 describe("sortByPriority", () => {
-  test("sorts targets by strategy priority (sessions first)", () => {
+  test("sorts targets by strategy priority (projects first)", () => {
     const targets = [
       "daily_rollups",
       "events",
@@ -155,8 +155,8 @@ describe("sortByPriority", () => {
     ];
     const sorted = sortByPriority(targets);
     expect(sorted).toEqual([
-      "sessions",
       "projects",
+      "sessions",
       "events",
       "daily_rollups",
     ]);
@@ -527,12 +527,12 @@ describe("SHIPPING_STRATEGIES", () => {
     expect(targets).not.toContain("facility_metrics");
   });
 
-  test("sessions has highest priority (0)", () => {
-    expect(SHIPPING_STRATEGIES.sessions.priority).toBe(0);
+  test("projects has highest priority (0)", () => {
+    expect(SHIPPING_STRATEGIES.projects.priority).toBe(0);
   });
 
-  test("projects has priority 1", () => {
-    expect(SHIPPING_STRATEGIES.projects.priority).toBe(1);
+  test("sessions has priority 1", () => {
+    expect(SHIPPING_STRATEGIES.sessions.priority).toBe(1);
   });
 
   test("events uses ignoreDuplicates", () => {
