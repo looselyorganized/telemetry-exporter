@@ -2,7 +2,7 @@
 
 Always-on Bun daemon that syncs Claude Code telemetry to Supabase for the LO facility dashboard. Uses OpenTelemetry as the sole data source for accurate per-request token and cost data. Local SQLite outbox provides durability — data survives daemon crashes and Supabase outages.
 
-**Version:** 0.5.0
+**Version:** 0.6.0
 
 ## Setup
 
