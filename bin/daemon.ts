@@ -202,6 +202,10 @@ if (IS_BACKFILL) {
   }
   if (startupShipped > 0) console.log(`  Startup drain: shipped ${startupShipped} outbox rows`);
 
+  // Reconcile daily_rollups with otel_api_requests (crash recovery)
+  const reconciled = await processor.reconcileRollups();
+  if (reconciled > 0) console.log(`  Reconciled ${reconciled} daily_rollups from otel_api_requests`);
+
   console.log("  Ready — will only sync new events from this point.\n");
 }
 console.log("Daemon running (250ms watcher + 5s pipeline). Press Ctrl+C to stop.\n");
