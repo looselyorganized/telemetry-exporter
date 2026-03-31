@@ -261,56 +261,17 @@ export class Processor {
 
   /**
    * Reconcile daily_rollups with otel_api_requests on startup.
-   * Ensures token/cost aggregates match the raw per-request data.
-   * Only updates tokens and cost columns — never touches events.
+   * Calls a Supabase RPC that runs server-side — bypasses RLS,
+   * only updates tokens and cost columns, never touches events.
    */
   async reconcileRollups(): Promise<number> {
     const supabase = getSupabase();
-
-    const { data: otelRows, error: otelError } = await supabase
-      .from("otel_api_requests")
-      .select("project_id, timestamp, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd");
-
-    if (otelError || !otelRows) return 0;
-
-    // Aggregate by (project_id, date, model)
-    const agg = new Map<string, {
-      project_id: string;
-      date: string;
-      tokens: Record<string, { input: number; output: number; cache_read: number; cache_write: number }>;
-      cost: Record<string, number>;
-    }>();
-
-    for (const row of otelRows) {
-      const date = (row.timestamp as string).substring(0, 10);
-      const key = `${row.project_id}\0${date}`;
-      let entry = agg.get(key);
-      if (!entry) {
-        entry = { project_id: row.project_id as string, date, tokens: {}, cost: {} };
-        agg.set(key, entry);
-      }
-      const model = row.model as string;
-      if (!entry.tokens[model]) {
-        entry.tokens[model] = { input: 0, output: 0, cache_read: 0, cache_write: 0 };
-      }
-      entry.tokens[model].input += Number(row.input_tokens) || 0;
-      entry.tokens[model].output += Number(row.output_tokens) || 0;
-      entry.tokens[model].cache_read += Number(row.cache_read_tokens) || 0;
-      entry.tokens[model].cache_write += Number(row.cache_write_tokens) || 0;
-      entry.cost[model] = (entry.cost[model] ?? 0) + (Number(row.cost_usd) || 0);
+    const { data, error } = await supabase.rpc("reconcile_rollups");
+    if (error) {
+      console.warn(`  reconcile: RPC failed: ${error.message}`);
+      return 0;
     }
-
-    // Update daily_rollups tokens + cost only (never touch events)
-    let updated = 0;
-    for (const entry of agg.values()) {
-      const { error } = await supabase
-        .from("daily_rollups")
-        .update({ tokens: entry.tokens, cost: entry.cost })
-        .eq("project_id", entry.project_id)
-        .eq("date", entry.date);
-
-      if (!error) updated++;
-    }
+    const updated = Number(data) || 0;
 
     return updated;
   }
