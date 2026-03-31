@@ -61,14 +61,20 @@ export function deriveProjectName(cwd: string): string {
   return result;
 }
 
+/** Org-root directory names that map to proj_org-root. */
+const ORG_ROOT_NAMES = new Set(["looselyorganized", "lo"]);
+const ORG_ROOT_ID = "proj_org-root";
+
 /**
  * Derive proj_UUID from a working directory.
  * Reads lo.yml for the canonical project ID (proj_*).
- * Falls back to slug-resolver for legacy compat.
+ * Falls back to org-root hardcode, then slug-resolver.
  */
 export function deriveProjId(cwd: string): string {
   const dirName = deriveProjectName(cwd);
   if (dirName === "unknown") return "unknown";
+  // Org-root hardcode (no lo.yml at monorepo root)
+  if (ORG_ROOT_NAMES.has(dirName)) return ORG_ROOT_ID;
   const projDir = join(PROJECT_ROOT, dirName);
   // Try lo.yml first (canonical project ID)
   const loYmlId = readLoYml(projDir);
