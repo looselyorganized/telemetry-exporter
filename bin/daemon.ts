@@ -18,7 +18,7 @@
 import { LOG_FILE } from "../src/parsers";
 import { initSupabase, getSupabase } from "../src/db/client";
 import { setFacilitySwitch } from "../src/db/facility";
-import { pushAgentState } from "../src/db/agent-state";
+import { pushAgentState, syncAgentStatus } from "../src/db/agent-state";
 import { ProcessWatcher } from "../src/process/watcher";
 import { getFacilityState } from "../src/process/scanner";
 import { ProjectResolver } from "../src/project/resolver";
@@ -239,6 +239,8 @@ async function watcherLoop(): Promise<never> {
           console.log(`  ${new Date().toLocaleTimeString()} [${event.type}] ${event.project} (pid ${event.pid})`);
         }
       }
+      // Sync raw CPU status every tick — instant, like claude-dashboard
+      await syncAgentStatus(state.processes);
       if (watcher.activeAgents > 0) {
         lastActiveAgentTime = Date.now();
         autoDormantFired = false;
