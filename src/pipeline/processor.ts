@@ -308,7 +308,9 @@ export class Processor {
     await this.resolver.refresh();
   }
 
-  /** Flush accumulated daily rollups to the outbox. Call once per pipeline cycle. */
+  /** Flush accumulated daily rollups to the outbox. Call once per pipeline cycle.
+   *  Does NOT clear pendingRollups — values accumulate across the daemon lifetime.
+   *  The dedup check (lastDailyPayloads) prevents re-enqueuing unchanged rollups. */
   flushRollups(): void {
     for (const [key, rollup] of this.pendingRollups) {
       const json = JSON.stringify(rollup);
@@ -316,7 +318,9 @@ export class Processor {
       this.lastDailyPayloads.set(key, json);
       enqueue("daily_rollups", rollup);
     }
-    this.pendingRollups.clear();
+    // DO NOT clear — pendingRollups must persist across cycles so that
+    // reconciled historical data and accumulated tokens are not lost.
+    // The dedup via lastDailyPayloads prevents duplicate outbox writes.
   }
 
   // ─── Private helpers ──────────────────────────────────────────────────────

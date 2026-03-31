@@ -708,13 +708,12 @@ describe("Processor.processOtelBatch", () => {
     const countFirst = (db.query("SELECT COUNT(*) as c FROM outbox WHERE target = 'daily_rollups'").get() as any).c;
     expect(countFirst).toBe(1);
 
-    // Second batch with identical data — pendingRollups was cleared, so it builds
-    // the same rollup again. flushRollups dedup should skip it.
-    processor.processOtelBatch(batch);
+    // Second flush with no new data — pendingRollups persists but dedup detects
+    // the payload is unchanged and skips re-enqueue.
     processor.flushRollups();
     const countSecond = (db.query("SELECT COUNT(*) as c FROM outbox WHERE target = 'daily_rollups'").get() as any).c;
 
-    // Identical payload — dedup should prevent re-enqueue
+    // Unchanged payload — dedup should prevent re-enqueue
     expect(countSecond).toBe(1);
   });
 
