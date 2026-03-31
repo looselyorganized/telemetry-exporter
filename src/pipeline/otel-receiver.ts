@@ -24,10 +24,16 @@ import { flattenAttributes } from "../otel/parser";
 const PROJECTS_DIR = join(homedir(), ".claude", "projects");
 const LO_ENCODED_PREFIX = "-users-bigviking-documents-github-projects-lo-";
 
+const LO_SESSION_CACHE_MAX = 1000;
 const loSessionCache = new Map<string, boolean | null>();
 
 function isLOSession(sessionId: string): boolean | null {
   if (loSessionCache.has(sessionId)) return loSessionCache.get(sessionId)!;
+  // Evict oldest entries if cache is full
+  if (loSessionCache.size >= LO_SESSION_CACHE_MAX) {
+    const firstKey = loSessionCache.keys().next().value;
+    if (firstKey) loSessionCache.delete(firstKey);
+  };
   let result: boolean | null = null;
   try {
     for (const dir of readdirSync(PROJECTS_DIR)) {

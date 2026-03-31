@@ -123,24 +123,19 @@ export class Processor {
       }
 
       // Step 4: Enqueue project activity updates (one per project, using latest timestamp)
-      const latestByProject = new Map<string, string>();
-      for (const { entry, projId } of resolved) {
+      // Slug lookup built during resolve pass (step 1) — no separate iteration needed
+      const latestByProject = new Map<string, { ts: string; slug: string }>();
+      for (const { entry, projId, slug } of resolved) {
         if (entry.parsedTimestamp === null) continue;
         const ts = entry.parsedTimestamp.toISOString();
         const existing = latestByProject.get(projId);
-        if (!existing || ts > existing) {
-          latestByProject.set(projId, ts);
+        if (!existing || ts > existing.ts) {
+          latestByProject.set(projId, { ts, slug });
         }
       }
 
-      // Build slug lookup from resolved entries
-      const slugByProject = new Map<string, string>();
-      for (const { projId, slug } of resolved) {
-        slugByProject.set(projId, slug);
-      }
-
-      for (const [projId, lastActive] of latestByProject) {
-        enqueue("projects", { id: projId, slug: slugByProject.get(projId), last_active: lastActive });
+      for (const [projId, { ts, slug }] of latestByProject) {
+        enqueue("projects", { id: projId, slug, last_active: ts });
       }
 
       // Step 6: Accumulate event counts into daily rollups
@@ -267,21 +262,20 @@ export class Processor {
   async reconcileRollups(): Promise<number> {
     const supabase = getSupabase();
 
-    // 1. Run server-side reconciliation (bypasses RLS)
-    const { data, error } = await supabase.rpc("reconcile_rollups");
-    if (error) {
-      console.warn(`  reconcile: RPC failed: ${error.message}`);
+    // Run reconciliation RPC and fetch seeding data in parallel
+    const [rpcResult, seedResult] = await Promise.all([
+      supabase.rpc("reconcile_rollups"),
+      supabase.from("daily_rollups")
+        .select("project_id, date, tokens, cost, events, sessions, errors")
+        .neq("tokens", "{}"),
+    ]);
+
+    if (rpcResult.error) {
+      console.warn(`  reconcile: RPC failed: ${rpcResult.error.message}`);
       return 0;
     }
-    const updated = Number(data) || 0;
-
-    // 2. Seed pendingRollups with ALL reconciled data so the live pipeline's
-    //    flushRollups() doesn't overwrite reconciled values with empty tokens.
-    //    Merges with any existing event counts from gap backfill.
-    const { data: reconciledRows } = await supabase
-      .from("daily_rollups")
-      .select("project_id, date, tokens, cost, events, sessions, errors")
-      .neq("tokens", "{}");
+    const updated = Number(rpcResult.data) || 0;
+    const reconciledRows = seedResult.data;
 
     if (reconciledRows) {
       for (const row of reconciledRows) {
@@ -318,9 +312,17 @@ export class Processor {
       this.lastDailyPayloads.set(key, json);
       enqueue("daily_rollups", rollup);
     }
-    // DO NOT clear — pendingRollups must persist across cycles so that
-    // reconciled historical data and accumulated tokens are not lost.
-    // The dedup via lastDailyPayloads prevents duplicate outbox writes.
+    // Prune entries older than 7 days to prevent unbounded growth.
+    // Today and recent days persist for accumulation; old days are flushed and evicted.
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - 7);
+    const cutoffStr = cutoff.toISOString().substring(0, 10);
+    for (const [key, rollup] of this.pendingRollups) {
+      if (rollup.date < cutoffStr) {
+        this.pendingRollups.delete(key);
+        this.lastDailyPayloads.delete(key);
+      }
+    }
   }
 
   // ─── Private helpers ──────────────────────────────────────────────────────
