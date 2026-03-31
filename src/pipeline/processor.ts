@@ -275,25 +275,27 @@ export class Processor {
     }
     const updated = Number(data) || 0;
 
-    // 2. Seed pendingRollups with today's reconciled data so the live pipeline
-    //    doesn't overwrite reconciled values with zero on the first flushRollups()
-    const todayStr = new Date().toISOString().substring(0, 10);
-    const { data: todayRows } = await supabase
+    // 2. Seed pendingRollups with ALL reconciled data so the live pipeline's
+    //    flushRollups() doesn't overwrite reconciled values with empty tokens.
+    //    Merges with any existing event counts from gap backfill.
+    const { data: reconciledRows } = await supabase
       .from("daily_rollups")
-      .select("project_id, tokens, cost, events, sessions, errors")
-      .eq("date", todayStr);
+      .select("project_id, date, tokens, cost, events, sessions, errors")
+      .neq("tokens", "{}");
 
-    if (todayRows) {
-      for (const row of todayRows) {
-        const key = `${row.project_id}\0${todayStr}`;
+    if (reconciledRows) {
+      for (const row of reconciledRows) {
+        const key = `${row.project_id}\0${row.date}`;
+        const existing = this.pendingRollups.get(key);
         this.pendingRollups.set(key, {
           project_id: row.project_id as string,
-          date: todayStr,
+          date: row.date as string,
           tokens: (row.tokens ?? {}) as Record<string, { input: number; cache_read: number; cache_write: number; output: number }>,
           cost: (row.cost ?? {}) as Record<string, number>,
-          events: (row.events ?? {}) as Record<string, number>,
-          sessions: Number(row.sessions) || 0,
-          errors: Number(row.errors) || 0,
+          // Merge: keep event counts from gap backfill if they exist, otherwise use reconciled
+          events: existing?.events ?? ((row.events ?? {}) as Record<string, number>),
+          sessions: existing?.sessions ?? (Number(row.sessions) || 0),
+          errors: existing?.errors ?? (Number(row.errors) || 0),
         });
       }
     }
