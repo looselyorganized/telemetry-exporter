@@ -266,12 +266,37 @@ export class Processor {
    */
   async reconcileRollups(): Promise<number> {
     const supabase = getSupabase();
+
+    // 1. Run server-side reconciliation (bypasses RLS)
     const { data, error } = await supabase.rpc("reconcile_rollups");
     if (error) {
       console.warn(`  reconcile: RPC failed: ${error.message}`);
       return 0;
     }
     const updated = Number(data) || 0;
+
+    // 2. Seed pendingRollups with today's reconciled data so the live pipeline
+    //    doesn't overwrite reconciled values with zero on the first flushRollups()
+    const todayStr = new Date().toISOString().substring(0, 10);
+    const { data: todayRows } = await supabase
+      .from("daily_rollups")
+      .select("project_id, tokens, cost, events, sessions, errors")
+      .eq("date", todayStr);
+
+    if (todayRows) {
+      for (const row of todayRows) {
+        const key = `${row.project_id}\0${todayStr}`;
+        this.pendingRollups.set(key, {
+          project_id: row.project_id as string,
+          date: todayStr,
+          tokens: (row.tokens ?? {}) as Record<string, { input: number; cache_read: number; cache_write: number; output: number }>,
+          cost: (row.cost ?? {}) as Record<string, number>,
+          events: (row.events ?? {}) as Record<string, number>,
+          sessions: Number(row.sessions) || 0,
+          errors: Number(row.errors) || 0,
+        });
+      }
+    }
 
     return updated;
   }
