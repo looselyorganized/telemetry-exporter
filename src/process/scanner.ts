@@ -4,7 +4,7 @@
  */
 
 import { execSync } from "child_process";
-import { existsSync } from "fs";
+import { existsSync, readFileSync } from "fs";
 import { basename, dirname, join } from "path";
 import { homedir } from "os";
 
@@ -96,40 +96,82 @@ export function clearProjectNameCache(): void {
   projectNameCache.clear();
 }
 
-/** PID→session cache (immutable for PID lifetime). */
-const pidSessionCache = new Map<number, string | null>();
+/** PID→session cache (immutable for PID lifetime — only caches successful resolutions). */
+const pidSessionCache = new Map<number, string>();
+
+/** Track first-seen time for unresolved PIDs (gives up after MAX_RESOLVE_AGE_MS). */
+const unresolvedFirstSeen = new Map<number, number>();
+
+/** Stop retrying session resolution after 5 minutes. */
+const MAX_RESOLVE_AGE_MS = 5 * 60 * 1000;
+
+/** Path to Claude Code's session files directory. */
+const SESSIONS_DIR = join(homedir(), ".claude", "sessions");
 
 /**
- * Resolve a Claude PID to its session_id by finding
- * the open ~/.claude/tasks/<session_id>/ directory handle.
+ * Try to resolve session_id from ~/.claude/sessions/<pid>.json.
+ * Claude Code writes these at process start (2.1.89+, observed in 2.1.88 too).
  */
-export function resolveSessionId(pid: number): string | null {
-  if (pidSessionCache.has(pid)) return pidSessionCache.get(pid)!;
-
-  const output = execQuiet(`lsof -p ${pid} 2>/dev/null`);
-  if (!output) {
-    pidSessionCache.set(pid, null);
-    return null;
+function resolveSessionFromFile(pid: number): string | null {
+  try {
+    const raw = readFileSync(join(SESSIONS_DIR, `${pid}.json`), "utf-8");
+    const data = JSON.parse(raw);
+    if (typeof data.sessionId === "string" && data.sessionId) return data.sessionId;
+  } catch {
+    // File doesn't exist yet or parse error — caller will retry
   }
+  return null;
+}
+
+/**
+ * Fallback: resolve session_id via lsof open directory handle.
+ * Works when the process holds ~/.claude/tasks/<session_id>/ open (pre-2.1.89 behavior).
+ */
+function resolveSessionFromLsof(pid: number): string | null {
+  const output = execQuiet(`lsof -p ${pid} 2>/dev/null`);
+  if (!output) return null;
 
   for (const line of output.split("\n")) {
     const match = line.match(
       /\.claude\/tasks\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i,
     );
-    if (match) {
-      const sessionId = match[1];
-      pidSessionCache.set(pid, sessionId);
-      return sessionId;
-    }
+    if (match) return match[1];
+  }
+  return null;
+}
+
+/**
+ * Resolve a Claude PID to its session_id.
+ * Primary: ~/.claude/sessions/<pid>.json (fast file read).
+ * Fallback: lsof for older CC versions.
+ * Retries on miss until MAX_RESOLVE_AGE_MS, then gives up.
+ */
+export function resolveSessionId(pid: number): string | null {
+  const cached = pidSessionCache.get(pid);
+  if (cached) return cached;
+
+  // Check if we've given up on this PID
+  const firstSeen = unresolvedFirstSeen.get(pid);
+  if (firstSeen && Date.now() - firstSeen > MAX_RESOLVE_AGE_MS) return null;
+
+  // Try session file first (fast), then lsof fallback
+  const sessionId = resolveSessionFromFile(pid) ?? resolveSessionFromLsof(pid);
+
+  if (sessionId) {
+    pidSessionCache.set(pid, sessionId);
+    unresolvedFirstSeen.delete(pid);
+    return sessionId;
   }
 
-  pidSessionCache.set(pid, null);
+  // Track when we first failed — will retry until MAX_RESOLVE_AGE_MS
+  if (!firstSeen) unresolvedFirstSeen.set(pid, Date.now());
   return null;
 }
 
 /** Clear PID→session cache for closed PIDs. */
 export function clearPidSession(pid: number): void {
   pidSessionCache.delete(pid);
+  unresolvedFirstSeen.delete(pid);
 }
 
 /** Parse Claude processes from ps output. */
