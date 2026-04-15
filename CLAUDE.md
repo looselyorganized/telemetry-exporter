@@ -152,3 +152,7 @@ export OTEL_EXPORTER_OTLP_PROTOCOL=http/json    # critical: forces JSON over pro
 export OTEL_LOGS_EXPORTER=otlp
 export OTEL_METRICS_EXPORTER=otlp
 ```
+
+## Operational runbooks
+
+- [`project_blocked`](docs/runbooks/project-blocked.md) — a `projects` insert failed (usually slug collision); structured log `{"evt":"project_blocked"}` points here. Reconcile via force-local / adopt-remote / discard, then restart the daemon.
