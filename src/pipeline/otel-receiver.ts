@@ -22,7 +22,11 @@ import { lookupSession } from "../otel/session-registry";
 import { flattenAttributes } from "../otel/parser";
 
 const PROJECTS_DIR = join(homedir(), ".claude", "projects");
-const LO_ENCODED_PREFIX = "-users-bigviking-documents-github-projects-lo-";
+const LO_PROJECT_DIR_RE = /^-users-bigviking-documents-github-projects-lo(?:-|$)/;
+
+export function isLOProjectDir(dir: string): boolean {
+  return LO_PROJECT_DIR_RE.test(dir.toLowerCase());
+}
 
 const LO_SESSION_CACHE_MAX = 1000;
 const loSessionCache = new Map<string, boolean | null>();
@@ -41,7 +45,7 @@ function isLOSession(sessionId: string): boolean | null {
       try {
         const files = readdirSync(dirPath);
         if (files.includes(`${sessionId}.jsonl`)) {
-          result = dir.toLowerCase().startsWith(LO_ENCODED_PREFIX);
+          result = isLOProjectDir(dir);
           break;
         }
         for (const entry of files) {
@@ -50,7 +54,7 @@ function isLOSession(sessionId: string): boolean | null {
             const subDir = join(dirPath, entry, "subagents");
             const subFiles = readdirSync(subDir);
             if (subFiles.includes(`${sessionId}.jsonl`)) {
-              result = dir.toLowerCase().startsWith(LO_ENCODED_PREFIX);
+              result = isLOProjectDir(dir);
               break;
             }
           } catch {}

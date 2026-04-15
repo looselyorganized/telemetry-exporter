@@ -7,7 +7,7 @@ import {
   upsertSession,
   getUnprocessedOtelEvents,
 } from "../../db/local";
-import { OtelReceiver } from "../otel-receiver";
+import { OtelReceiver, isLOProjectDir } from "../otel-receiver";
 
 const TEST_DB_PATH = "/tmp/lo-test-otel-receiver.db";
 
@@ -236,5 +236,34 @@ describe("OtelReceiver", () => {
     // Should be marked processed (can't parse, don't retry forever)
     expect(batch.apiRequests).toHaveLength(0);
     expect(getUnprocessedOtelEvents(10)).toHaveLength(0);
+  });
+});
+
+describe("isLOProjectDir", () => {
+  test("matches lo monorepo root (exact, no trailing hyphen)", () => {
+    expect(isLOProjectDir("-Users-bigviking-Documents-github-projects-lo")).toBe(true);
+  });
+
+  test("matches lo subprojects (platform, augment-1, etc.)", () => {
+    expect(isLOProjectDir("-Users-bigviking-Documents-github-projects-lo-platform")).toBe(true);
+    expect(isLOProjectDir("-Users-bigviking-Documents-github-projects-lo-augment-1")).toBe(true);
+  });
+
+  test("matches lo worktrees", () => {
+    expect(
+      isLOProjectDir("-Users-bigviking-Documents-github-projects-lo-cr-agent--claude-worktrees-t001"),
+    ).toBe(true);
+  });
+
+  test("does NOT match looselyorganized (substring collision)", () => {
+    expect(
+      isLOProjectDir("-Users-bigviking-Documents-github-projects-looselyorganized"),
+    ).toBe(false);
+  });
+
+  test("does NOT match unrelated project", () => {
+    expect(
+      isLOProjectDir("-Users-bigviking-Documents-github-projects-mhofwell-fpl-chat-app"),
+    ).toBe(false);
   });
 });
