@@ -727,3 +727,32 @@ describe("purgeFailed", () => {
     expect(remaining).toHaveLength(1);
   });
 });
+
+describe("projects_blocked schema", () => {
+  it("creates projects_blocked table with expected columns", () => {
+    initLocal(TEST_DB_PATH);
+    const db = getLocal();
+    const cols = db
+      .query("PRAGMA table_info(projects_blocked)")
+      .all() as Array<{ name: string; type: string; notnull: number }>;
+    expect(cols.length).toBeGreaterThan(0);
+    const byName = new Map(cols.map((c) => [c.name, c]));
+    expect(byName.get("proj_id")?.type).toBe("TEXT");
+    expect(byName.get("proj_id")?.notnull).toBe(1);
+    expect(byName.get("slug")?.notnull).toBe(1);
+    expect(byName.get("reason")?.notnull).toBe(1);
+    expect(byName.get("error_message")?.notnull).toBe(1);
+    expect(byName.get("first_seen_at")?.notnull).toBe(1);
+    expect(byName.get("resolved_at")?.notnull).toBe(0);
+  });
+
+  it("creates partial index idx_projects_blocked_open for open blocks", () => {
+    initLocal(TEST_DB_PATH);
+    const db = getLocal();
+    const indexes = db
+      .query("SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='projects_blocked'")
+      .all() as Array<{ name: string }>;
+    const names = indexes.map((r) => r.name);
+    expect(names).toContain("idx_projects_blocked_open");
+  });
+});

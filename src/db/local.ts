@@ -75,6 +75,18 @@ CREATE TABLE IF NOT EXISTS cost_tracking (
   request_count       INTEGER DEFAULT 0,
   PRIMARY KEY (proj_id, date, model)
 );
+
+CREATE TABLE IF NOT EXISTS projects_blocked (
+  proj_id        TEXT PRIMARY KEY NOT NULL,
+  slug           TEXT NOT NULL,
+  reason         TEXT NOT NULL,
+  error_message  TEXT NOT NULL,
+  first_seen_at  TEXT NOT NULL,
+  resolved_at    TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_projects_blocked_open
+  ON projects_blocked(proj_id) WHERE resolved_at IS NULL;
 `;
 
 export function initLocal(dbPath: string): void {
