@@ -13,6 +13,7 @@ import {
   outboxDepth as outboxDepthLocal,
   archiveDepth as archiveDepthLocal,
 } from "../db/local";
+import { ProjectBlocker } from "./project-blocker";
 
 // ---------------------------------------------------------------------------
 // Re-export types for convenience
@@ -247,10 +248,12 @@ function stripFields(payload: Record<string, unknown>, excludeFields: string[]):
 export class Shipper {
   private supabase: SupabaseClient;
   private breaker: CircuitBreaker;
+  private blocker: ProjectBlocker;
 
-  constructor(supabase: SupabaseClient) {
+  constructor(supabase: SupabaseClient, blocker: ProjectBlocker) {
     this.supabase = supabase;
     this.breaker = new CircuitBreaker();
+    this.blocker = blocker;
   }
 
   async ship(): Promise<ShipResult> {
@@ -274,8 +277,10 @@ export class Shipper {
     const grouped = groupByTarget(rows);
     const orderedTargets = sortByPriority([...grouped.keys()]);
 
-    // Track project IDs whose registration permanently failed (4xx)
-    const blockedProjIds = new Set<string>();
+    // Project IDs whose registration has permanently failed — authoritative Set
+    // is on the ProjectBlocker; this local snapshot picks up new blocks added
+    // during this ship cycle (below) as well as persisted blocks from prior runs.
+    const blockedProjIds = this.blocker.getBlocked();
 
     for (const target of orderedTargets) {
       let targetRows = grouped.get(target)!;
@@ -373,12 +378,31 @@ export class Shipper {
             result.failed += batchIds.length;
             result.byTarget[targetKey].failed += batchIds.length;
 
-            // Track project IDs that permanently failed for FK blocking
-            if (targetKey === "projects") {
-              for (const p of batchPayloads) {
-                if (typeof p.id === "string") {
-                  blockedProjIds.add(p.id);
-                }
+            // Persist the block + emit one loud structured log per NEW incident.
+            // "New" = no open row, or error_message changed, or re-block after resolve.
+            const reason: "slug_collision" | "fk_cascade" =
+              targetKey === "projects" ? "slug_collision" : "fk_cascade";
+            for (const p of batchPayloads) {
+              const projId =
+                targetKey === "projects"
+                  ? (typeof p.id === "string" ? p.id : null)
+                  : (typeof p.project_id === "string" ? p.project_id : null);
+              if (!projId) continue;
+              const slug = typeof p.slug === "string" ? p.slug : "";
+              const isNew = this.blocker.recordBlock(projId, slug, reason, errMsg);
+              blockedProjIds.add(projId);
+              if (isNew) {
+                console.warn(
+                  JSON.stringify({
+                    evt: "project_blocked",
+                    ts: new Date().toISOString(),
+                    proj_id: projId,
+                    slug,
+                    reason,
+                    error_message: errMsg,
+                    runbook: "telemetry-exporter/docs/runbooks/project-blocked.md",
+                  })
+                );
               }
             }
           }
