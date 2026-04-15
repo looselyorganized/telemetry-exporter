@@ -22,6 +22,7 @@ import { pushAgentState, syncAgentStatus } from "../src/db/agent-state";
 import { ProcessWatcher } from "../src/process/watcher";
 import { getFacilityState } from "../src/process/scanner";
 import { ProjectResolver } from "../src/project/resolver";
+import { ProjectBlocker } from "../src/pipeline/project-blocker";
 import { reportError, clearErrors } from "../src/errors";
 import { flushErrors, pruneResolved, clearErrorsTable } from "../src/db/errors";
 import { PID_FILE, isExporterProcess, parsePidFile } from "../src/cli-output";
@@ -146,8 +147,14 @@ console.log(`  Session registry: ${sessionCount} sessions mapped from ~/.claude/
 
 const logReceiver = new LogReceiver(LOG_FILE, DB_PATH);
 const otelReceiver = new OtelReceiver();
-const processor = new Processor(resolver, getLocal());
-const shipper = new Shipper(getSupabase());
+const projectBlocker = new ProjectBlocker(getLocal());
+projectBlocker.loadBlocked();
+const blockedAtStartup = projectBlocker.getBlocked().size;
+if (blockedAtStartup > 0) {
+  console.log(`  ProjectBlocker: ${blockedAtStartup} project(s) blocked — see docs/runbooks/project-blocked.md`);
+}
+const processor = new Processor(resolver, getLocal(), projectBlocker);
+const shipper = new Shipper(getSupabase(), projectBlocker);
 await processor.hydrate();
 
 // ─── Gap detection ──────────────────────────────────────────────────────────
@@ -328,6 +335,22 @@ async function pipelineLoop(): Promise<never> {
         if (watcher.activeAgents > 0 && otelRate === 0) {
           console.warn(`  ${time()} — Active agents detected but no OTel events — check CLAUDE_CODE_ENABLE_TELEMETRY`);
         }
+
+        // Emit periodic drop-count summary for blocked projects, then reset.
+        for (const [projId, byTarget] of Object.entries(processor.droppedSinceLastLog)) {
+          const totalDropped = Object.values(byTarget).reduce((sum, n) => sum + n, 0);
+          if (totalDropped === 0) continue;
+          console.warn(
+            JSON.stringify({
+              evt: "project_blocked.drops",
+              ts: new Date().toISOString(),
+              proj_id: projId,
+              dropped_since_last_log: totalDropped,
+              target_breakdown: byTarget,
+            })
+          );
+        }
+        processor.droppedSinceLastLog = {};
       }
       cycle++;
     } catch (err) {
