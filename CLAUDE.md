@@ -4,9 +4,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What This Is
 
-Bun-powered TypeScript daemon that syncs Claude Code telemetry from `~/.claude/` to Supabase for the LO facility dashboard. Uses OpenTelemetry as the sole data source for accurate per-request token and cost data. Local SQLite outbox provides durability — data survives daemon crashes and Supabase outages. No build step — Bun runs `.ts` files directly.
+Bun-powered TypeScript daemon that syncs Claude Code telemetry from `~/.claude/` to Supabase for the LORF facility dashboard. Uses OpenTelemetry as the sole source of per-request token and cost data. A local SQLite outbox (WAL mode) provides durability — data survives daemon crashes and Supabase outages. No build step — Bun runs `.ts` files directly.
 
-**Version:** 0.6.0 (hardened PID lock, FK race fixes, billable tokens, real-time agent state)
+**Version:** 0.6.0
+
+For product-facing documentation (setup, dependencies, "what it does"), see `README.md`. This file is the internal working reference for Claude Code sessions editing this repo.
 
 ## Commands
 
