@@ -39,11 +39,16 @@ sqlite3 data/telemetry.db "SELECT target, COUNT(*) FROM outbox
 
 Example: `augment-1` exists locally as an active Auggy runtime; Supabase has a leftover row with the same slug from a prior experiment.
 
-**Step 1 — Archive the stale remote row** (run in the Supabase SQL editor):
+**Step 1 — Archive AND rename the stale remote row's slug** (run in the Supabase SQL editor):
 
 ```sql
-UPDATE projects SET archived_at = NOW() WHERE id = '<stale_remote_proj_id>';
+UPDATE projects
+  SET archived_at = NOW(),
+      slug        = slug || '-archived-' || to_char(NOW(), 'YYYYMMDD')
+  WHERE id = '<stale_remote_proj_id>';
 ```
+
+**Why rename?** The `UNIQUE(slug)` constraint on `projects` does not exempt archived rows, so the slug must be freed explicitly for the exporter's next insert to succeed. A dated suffix preserves history and keeps future re-archive events unambiguous.
 
 **Step 2 — Mark the block resolved locally**:
 
