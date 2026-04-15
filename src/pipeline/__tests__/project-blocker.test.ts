@@ -70,3 +70,68 @@ describe("ProjectBlocker.loadBlocked + isBlocked", () => {
     expect(blocker.isBlocked("proj_Y")).toBe(true);
   });
 });
+
+describe("ProjectBlocker.recordBlock", () => {
+  it("first block returns isNew=true and persists the row", () => {
+    const db = getLocal();
+    const blocker = new ProjectBlocker(db);
+    blocker.loadBlocked();
+
+    const isNew = blocker.recordBlock("proj_A", "slug-a", "slug_collision", "dup key value");
+
+    expect(isNew).toBe(true);
+    expect(blocker.isBlocked("proj_A")).toBe(true);
+    const row = db.query("SELECT * FROM projects_blocked WHERE proj_id=?").get("proj_A") as {
+      slug: string;
+      reason: string;
+      error_message: string;
+      resolved_at: string | null;
+    };
+    expect(row.slug).toBe("slug-a");
+    expect(row.reason).toBe("slug_collision");
+    expect(row.error_message).toBe("dup key value");
+    expect(row.resolved_at).toBe(null);
+  });
+
+  it("repeat block with same error returns isNew=false (idempotent, no log)", () => {
+    const db = getLocal();
+    const blocker = new ProjectBlocker(db);
+    blocker.loadBlocked();
+
+    expect(blocker.recordBlock("proj_A", "slug-a", "slug_collision", "dup")).toBe(true);
+    expect(blocker.recordBlock("proj_A", "slug-a", "slug_collision", "dup")).toBe(false);
+  });
+
+  it("repeat block with changed error returns isNew=true and updates error_message", () => {
+    const db = getLocal();
+    const blocker = new ProjectBlocker(db);
+    blocker.loadBlocked();
+
+    expect(blocker.recordBlock("proj_A", "slug-a", "slug_collision", "err1")).toBe(true);
+    expect(blocker.recordBlock("proj_A", "slug-a", "slug_collision", "err2")).toBe(true);
+    const row = db.query("SELECT error_message FROM projects_blocked WHERE proj_id=?").get("proj_A") as {
+      error_message: string;
+    };
+    expect(row.error_message).toBe("err2");
+  });
+
+  it("re-block after resolve returns isNew=true and clears resolved_at", () => {
+    const db = getLocal();
+    const blocker = new ProjectBlocker(db);
+    blocker.loadBlocked();
+
+    blocker.recordBlock("proj_A", "slug-a", "slug_collision", "err1");
+    db.query("UPDATE projects_blocked SET resolved_at=? WHERE proj_id=?")
+      .run(new Date().toISOString(), "proj_A");
+    blocker.loadBlocked(); // simulate restart
+    expect(blocker.isBlocked("proj_A")).toBe(false);
+
+    const isNew = blocker.recordBlock("proj_A", "slug-a", "slug_collision", "err1");
+    expect(isNew).toBe(true);
+    expect(blocker.isBlocked("proj_A")).toBe(true);
+    const row = db.query("SELECT resolved_at FROM projects_blocked WHERE proj_id=?").get("proj_A") as {
+      resolved_at: string | null;
+    };
+    expect(row.resolved_at).toBe(null);
+  });
+});
