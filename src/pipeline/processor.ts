@@ -4,6 +4,7 @@ import type { LogEntry } from "../parsers";
 import { enqueue, enqueueArchive, addKnownProject, getKnownProjectIds } from "../db/local";
 import { getSupabase } from "../db/client";
 import type { OtelEventBatch } from "./otel-receiver";
+import type { ProjectBlocker } from "./project-blocker";
 
 // ─── Tool name → event type classification ──────────────────────────────────
 // Maps OTel tool_name to the same event types the JSONL emoji pipeline uses.
@@ -50,6 +51,7 @@ function classifyToolName(toolName: string): string {
 export class Processor {
   private resolver: ProjectResolver;
   private db: Database;
+  private blocker: ProjectBlocker;
   private knownProjects: Set<string>;
   private lastDailyPayloads: Map<string, string> = new Map();
   /** Accumulate daily rollup data across processOtelBatch and processEvents. */
@@ -66,10 +68,24 @@ export class Processor {
   private firedAlerts: Set<string> = new Set();
   private static BUDGET_THRESHOLDS = [5, 10, 25];
 
-  constructor(resolver: ProjectResolver, db: Database) {
+  /** Drop counters keyed by proj_id → target → count. Reset each time the daemon emits a summary log. */
+  public droppedSinceLastLog: Record<string, Record<string, number>> = {};
+
+  constructor(resolver: ProjectResolver, db: Database, blocker: ProjectBlocker) {
     this.resolver = resolver;
     this.db = db;
+    this.blocker = blocker;
     this.knownProjects = new Set<string>();
+  }
+
+  /** Enqueue if project is not blocked. Silent drop otherwise; daemon loop emits periodic summary. */
+  private enqueueIfAllowed(target: string, payload: Record<string, unknown>, projId: string): void {
+    if (this.blocker.isBlocked(projId)) {
+      this.droppedSinceLastLog[projId] ??= {};
+      this.droppedSinceLastLog[projId][target] = (this.droppedSinceLastLog[projId][target] ?? 0) + 1;
+      return;
+    }
+    enqueue(target, payload);
   }
 
   /** Check if a project has been registered (enqueued to outbox). */
@@ -100,7 +116,7 @@ export class Processor {
       // Step 2: Register unknown projects
       for (const { projId, slug } of resolved) {
         if (!this.knownProjects.has(projId)) {
-          enqueue("projects", { id: projId, slug });
+          this.enqueueIfAllowed("projects", { id: projId, slug }, projId);
           addKnownProject(projId, slug);
           this.knownProjects.add(projId);
         }
@@ -117,7 +133,7 @@ export class Processor {
           branch: entry.branch,
           emoji: entry.emoji,
         };
-        enqueue("events", eventPayload);
+        this.enqueueIfAllowed("events", eventPayload, projId);
 
         // Step 5: Archive each event with a content hash
         const hashInput = `${projId}\0${entry.eventType}\0${entry.eventText}\0${timestamp ?? ""}`;
@@ -140,7 +156,7 @@ export class Processor {
       }
 
       for (const [projId, { ts, slug }] of latestByProject) {
-        enqueue("projects", { id: projId, slug, last_active: ts });
+        this.enqueueIfAllowed("projects", { id: projId, slug, last_active: ts }, projId);
       }
 
       // Step 6: Accumulate event counts into daily rollups
@@ -171,7 +187,7 @@ export class Processor {
         const date = req.timestamp.substring(0, 10);
 
         // Ship raw per-request to Supabase
-        enqueue("otel_api_requests", {
+        this.enqueueIfAllowed("otel_api_requests", {
           project_id: req.projId,
           session_id: req.sessionId,
           model: req.model,
@@ -182,7 +198,7 @@ export class Processor {
           cost_usd: req.costUsd,
           duration_ms: req.durationMs,
           timestamp: req.timestamp,
-        });
+        }, req.projId);
 
         // Accumulate into daily rollups
         const rollup = this.getRollup(req.projId, date);
@@ -207,13 +223,13 @@ export class Processor {
 
       // 3. Enqueue tool_decision rejects as individual events (for attention alerts)
       for (const reject of batch.toolDecisionRejects) {
-        enqueue("events", {
+        this.enqueueIfAllowed("events", {
           project_id: reject.projId,
           session_id: reject.sessionId,
           event_type: "tool_decision_reject",
           event_text: `🔐 ${reject.toolName} rejected`,
           timestamp: reject.timestamp,
-        });
+        }, reject.projId);
       }
 
       // 4. Enqueue api_errors as individual events + accumulate error count
@@ -222,13 +238,13 @@ export class Processor {
         const rollup = this.getRollup(err.projId, date);
         rollup.errors += 1;
 
-        enqueue("events", {
+        this.enqueueIfAllowed("events", {
           project_id: err.projId,
           session_id: err.sessionId,
           event_type: "api_error",
           event_text: `⚠️ ${err.statusCode} ${err.error} (${err.model})`,
           timestamp: err.timestamp,
-        });
+        }, err.projId);
       }
 
       // 5. Budget threshold alerts — use cumulative rollup cost (not per-batch)
@@ -240,13 +256,13 @@ export class Processor {
         for (const threshold of Processor.BUDGET_THRESHOLDS) {
           const alertKey = `${projId}\0${today}\0${threshold}`;
           if (dailyCost >= threshold && !this.firedAlerts.has(alertKey)) {
-            enqueue("alerts", {
+            this.enqueueIfAllowed("alerts", {
               project_id: projId,
               alert_type: "budget_threshold",
               threshold_usd: threshold,
               current_usd: Math.round(dailyCost * 100) / 100,
               date: today,
-            });
+            }, projId);
             this.firedAlerts.add(alertKey);
           }
         }
@@ -315,7 +331,7 @@ export class Processor {
       const json = JSON.stringify(rollup);
       if (this.lastDailyPayloads.get(key) === json) continue;
       this.lastDailyPayloads.set(key, json);
-      enqueue("daily_rollups", rollup);
+      this.enqueueIfAllowed("daily_rollups", rollup as unknown as Record<string, unknown>, rollup.project_id);
     }
     // Prune entries older than 7 days to prevent unbounded growth.
     // Today and recent days persist for accumulation; old days are flushed and evicted.

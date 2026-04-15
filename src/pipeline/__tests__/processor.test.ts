@@ -4,9 +4,16 @@ import { mkdtempSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { Processor } from "../processor";
+import { ProjectBlocker } from "../project-blocker";
 import { initLocal, getLocal } from "../../db/local";
 import type { LogEntry } from "../../parsers";
 import type { ResolvedProject } from "../../project/resolver";
+
+function makeBlocker(db: Database): ProjectBlocker {
+  const b = new ProjectBlocker(db);
+  b.loadBlocked();
+  return b;
+}
 
 // ---------------------------------------------------------------------------
 // Mock ProjectResolver
@@ -71,7 +78,7 @@ describe("Processor.processEvents", () => {
     const resolver = new MockResolver({
       // no mapping for 'unknown-project'
     });
-    const processor = new Processor(resolver as any, db);
+    const processor = new Processor(resolver as any, db, makeBlocker(db));
 
     processor.processEvents([
       makeEntry({ project: "unknown-project" }),
@@ -85,7 +92,7 @@ describe("Processor.processEvents", () => {
     const resolver = new MockResolver({
       "my-project": { projId: "proj_abc123", slug: "my-project" },
     });
-    const processor = new Processor(resolver as any, db);
+    const processor = new Processor(resolver as any, db, makeBlocker(db));
 
     processor.processEvents([makeEntry({ project: "my-project" })]);
 
@@ -103,7 +110,7 @@ describe("Processor.processEvents", () => {
     const resolver = new MockResolver({
       "my-project": { projId: "proj_abc123", slug: "my-project" },
     });
-    const processor = new Processor(resolver as any, db);
+    const processor = new Processor(resolver as any, db, makeBlocker(db));
 
     processor.processEvents([makeEntry({ project: "my-project" })]);
 
@@ -117,7 +124,7 @@ describe("Processor.processEvents", () => {
     const resolver = new MockResolver({
       "my-project": { projId: "proj_abc123", slug: "my-project" },
     });
-    const processor = new Processor(resolver as any, db);
+    const processor = new Processor(resolver as any, db, makeBlocker(db));
 
     // First call — registers it
     processor.processEvents([makeEntry({ project: "my-project" })]);
@@ -138,7 +145,7 @@ describe("Processor.processEvents", () => {
     const resolver = new MockResolver({
       "my-project": { projId: "proj_abc123", slug: "my-project" },
     });
-    const processor = new Processor(resolver as any, db);
+    const processor = new Processor(resolver as any, db, makeBlocker(db));
 
     const entry = makeEntry({
       project: "my-project",
@@ -169,7 +176,7 @@ describe("Processor.processEvents", () => {
     const resolver = new MockResolver({
       "my-project": { projId: "proj_aaa", slug: "my-project" },
     });
-    const processor = new Processor(resolver as any, db);
+    const processor = new Processor(resolver as any, db, makeBlocker(db));
     processor.loadKnownProjects();
 
     const entries: LogEntry[] = [
@@ -196,7 +203,7 @@ describe("Processor.processEvents", () => {
     const resolver = new MockResolver({
       "my-project": { projId: "proj_abc123", slug: "my-project" },
     });
-    const processor = new Processor(resolver as any, db);
+    const processor = new Processor(resolver as any, db, makeBlocker(db));
 
     const t1 = new Date("2026-03-19T09:00:00Z");
     const t2 = new Date("2026-03-19T10:30:00Z");
@@ -222,7 +229,7 @@ describe("Processor.processEvents", () => {
     const resolver = new MockResolver({
       "my-project": { projId: "proj_abc123", slug: "my-project" },
     });
-    const processor = new Processor(resolver as any, db);
+    const processor = new Processor(resolver as any, db, makeBlocker(db));
 
     processor.processEvents([makeEntry({ project: "my-project" })]);
 
@@ -239,7 +246,7 @@ describe("Processor.processEvents", () => {
     const resolver = new MockResolver({
       "my-project": { projId: "proj_abc123", slug: "my-project" },
     });
-    const processor = new Processor(resolver as any, db);
+    const processor = new Processor(resolver as any, db, makeBlocker(db));
 
     const entry = makeEntry({ project: "my-project" });
     processor.processEvents([entry]);
@@ -261,7 +268,7 @@ describe("Processor.processEvents", () => {
       },
     };
 
-    const processor = new Processor(faultyResolver as any, db);
+    const processor = new Processor(faultyResolver as any, db, makeBlocker(db));
 
     const entries = [
       makeEntry({ project: "my-project", parsedTimestamp: new Date("2026-03-19T10:00:00Z") }),
@@ -282,7 +289,7 @@ describe("Processor.processEvents", () => {
 
   test("handles empty entries array — no error, no writes", () => {
     const resolver = new MockResolver({});
-    const processor = new Processor(resolver as any, db);
+    const processor = new Processor(resolver as any, db, makeBlocker(db));
 
     expect(() => processor.processEvents([])).not.toThrow();
 
@@ -297,7 +304,7 @@ describe("Processor.processEvents", () => {
       "project-a": { projId: "proj_aaa", slug: "project-a" },
       "project-b": { projId: "proj_bbb", slug: "project-b" },
     });
-    const processor = new Processor(resolver as any, db);
+    const processor = new Processor(resolver as any, db, makeBlocker(db));
 
     processor.processEvents([
       makeEntry({ project: "project-a", parsedTimestamp: new Date("2026-03-19T09:00:00Z") }),
@@ -327,7 +334,7 @@ describe("Processor.processEvents", () => {
     const resolver = new MockResolver({
       "preloaded-dir": { projId: "proj_preloaded", slug: "preloaded" },
     });
-    const processor = new Processor(resolver as any, db);
+    const processor = new Processor(resolver as any, db, makeBlocker(db));
     processor.loadKnownProjects();
 
     // Process entry for the already-known project
@@ -344,7 +351,7 @@ describe("Processor.processEvents", () => {
     const resolver = new MockResolver({
       "my-project": { projId: "proj_abc123", slug: "my-project" },
     });
-    const processor = new Processor(resolver as any, db);
+    const processor = new Processor(resolver as any, db, makeBlocker(db));
 
     processor.processEvents([
       makeEntry({ project: "my-project", parsedTimestamp: null }),
@@ -374,7 +381,7 @@ describe("Processor.hydrate", () => {
     const resolver = new MockResolver({
       "hydrate-dir": { projId: "proj_hydrate_test", slug: "hydrate-slug" },
     });
-    const processor = new Processor(resolver as any, db);
+    const processor = new Processor(resolver as any, db, makeBlocker(db));
     await processor.hydrate();
 
     // Process entry for the already-known project — registration row should NOT appear
@@ -401,7 +408,7 @@ describe("Processor.refreshResolver", () => {
       refresh: async () => { refreshCalled = true; },
     };
 
-    const processor = new Processor(mockResolver as any, db);
+    const processor = new Processor(mockResolver as any, db, makeBlocker(db));
     await processor.refreshResolver();
 
     expect(refreshCalled).toBe(true);
@@ -428,7 +435,7 @@ describe("Processor.processOtelBatch", () => {
 
   test("does nothing for empty batch", () => {
     const resolver = new MockResolver({});
-    const processor = new Processor(resolver as any, db);
+    const processor = new Processor(resolver as any, db, makeBlocker(db));
 
     processor.processOtelBatch(makeBatch());
 
@@ -438,7 +445,7 @@ describe("Processor.processOtelBatch", () => {
 
   test("enqueues otel_api_requests per request", () => {
     const resolver = new MockResolver({});
-    const processor = new Processor(resolver as any, db);
+    const processor = new Processor(resolver as any, db, makeBlocker(db));
     const today = todayStr();
 
     processor.processOtelBatch(makeBatch({
@@ -472,7 +479,7 @@ describe("Processor.processOtelBatch", () => {
 
   test("accumulates tokens and cost into pendingRollups via flushRollups", () => {
     const resolver = new MockResolver({});
-    const processor = new Processor(resolver as any, db);
+    const processor = new Processor(resolver as any, db, makeBlocker(db));
     const today = todayStr();
 
     processor.processOtelBatch(makeBatch({
@@ -520,7 +527,7 @@ describe("Processor.processOtelBatch", () => {
 
   test("accumulates multiple api_requests for same model into rollup", () => {
     const resolver = new MockResolver({});
-    const processor = new Processor(resolver as any, db);
+    const processor = new Processor(resolver as any, db, makeBlocker(db));
     const today = todayStr();
 
     processor.processOtelBatch(makeBatch({
@@ -557,7 +564,7 @@ describe("Processor.processOtelBatch", () => {
 
   test("accumulates tool_result counts into rollup events", () => {
     const resolver = new MockResolver({});
-    const processor = new Processor(resolver as any, db);
+    const processor = new Processor(resolver as any, db, makeBlocker(db));
 
     processor.processOtelBatch(makeBatch({
       toolResults: [
@@ -595,7 +602,7 @@ describe("Processor.processOtelBatch", () => {
 
   test("does not enqueue tool_results as individual events", () => {
     const resolver = new MockResolver({});
-    const processor = new Processor(resolver as any, db);
+    const processor = new Processor(resolver as any, db, makeBlocker(db));
 
     processor.processOtelBatch(makeBatch({
       toolResults: [
@@ -619,7 +626,7 @@ describe("Processor.processOtelBatch", () => {
 
   test("enqueues tool_decision rejects as individual events", () => {
     const resolver = new MockResolver({});
-    const processor = new Processor(resolver as any, db);
+    const processor = new Processor(resolver as any, db, makeBlocker(db));
 
     processor.processOtelBatch(makeBatch({
       toolDecisionRejects: [
@@ -645,7 +652,7 @@ describe("Processor.processOtelBatch", () => {
 
   test("enqueues api_errors as individual events and accumulates error count in rollup", () => {
     const resolver = new MockResolver({});
-    const processor = new Processor(resolver as any, db);
+    const processor = new Processor(resolver as any, db, makeBlocker(db));
     const today = todayStr();
 
     processor.processOtelBatch(makeBatch({
@@ -692,7 +699,7 @@ describe("Processor.processOtelBatch", () => {
 
   test("per-payload dedup via flushRollups: identical rollup is not re-enqueued", () => {
     const resolver = new MockResolver({});
-    const processor = new Processor(resolver as any, db);
+    const processor = new Processor(resolver as any, db, makeBlocker(db));
     const today = todayStr();
 
     const batch = makeBatch({
@@ -719,7 +726,7 @@ describe("Processor.processOtelBatch", () => {
 
   test("flushRollups enqueues when rollup data changes between cycles", () => {
     const resolver = new MockResolver({});
-    const processor = new Processor(resolver as any, db);
+    const processor = new Processor(resolver as any, db, makeBlocker(db));
     const today = todayStr();
 
     processor.processOtelBatch(makeBatch({
@@ -748,7 +755,7 @@ describe("Processor.processOtelBatch", () => {
 
   test("fires budget alert when daily cost exceeds threshold", () => {
     const resolver = new MockResolver({});
-    const processor = new Processor(resolver as any, db);
+    const processor = new Processor(resolver as any, db, makeBlocker(db));
     const today = todayStr();
 
     // Send enough cost to exceed $5 threshold
@@ -774,7 +781,7 @@ describe("Processor.processOtelBatch", () => {
 
   test("fires multiple alerts for multiple thresholds", () => {
     const resolver = new MockResolver({});
-    const processor = new Processor(resolver as any, db);
+    const processor = new Processor(resolver as any, db, makeBlocker(db));
     const today = todayStr();
 
     processor.processOtelBatch(makeBatch({
@@ -797,7 +804,7 @@ describe("Processor.processOtelBatch", () => {
 
   test("does not re-fire same threshold on subsequent batches", () => {
     const resolver = new MockResolver({});
-    const processor = new Processor(resolver as any, db);
+    const processor = new Processor(resolver as any, db, makeBlocker(db));
     const today = todayStr();
 
     const batch = makeBatch({
@@ -824,7 +831,7 @@ describe("Processor.processOtelBatch", () => {
 
   test("does not fire alert below threshold", () => {
     const resolver = new MockResolver({});
-    const processor = new Processor(resolver as any, db);
+    const processor = new Processor(resolver as any, db, makeBlocker(db));
     const today = todayStr();
 
     processor.processOtelBatch(makeBatch({
@@ -845,7 +852,7 @@ describe("Processor.processOtelBatch", () => {
     const resolver = new MockResolver({
       "my-project": { projId: "proj_abc", slug: "my-project" },
     });
-    const processor = new Processor(resolver as any, db);
+    const processor = new Processor(resolver as any, db, makeBlocker(db));
     const today = todayStr();
 
     // Process events (from JSONL pipeline)
