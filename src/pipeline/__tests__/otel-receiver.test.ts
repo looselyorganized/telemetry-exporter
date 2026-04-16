@@ -341,6 +341,37 @@ describe("OtelReceiver with discovery", () => {
     rmSync(projectsDir, { recursive: true });
   });
 
+  test("batch-scope memo: multiple events for same unknown session share one discovery", () => {
+    const projectsDir = createMockProjectsDir({
+      "-Users-bigviking-Documents-github-projects-lo-platform": [
+        "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.jsonl",
+      ],
+    });
+    const resolver = mockResolver({
+      "-Users-bigviking-Documents-github-projects-lo-platform": "proj_platform",
+    });
+
+    for (let i = 0; i < 5; i++) {
+      insertOtelEvent("api_request", "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", makeLogRecord({
+        "event.name": "api_request",
+        model: "claude-opus-4-6",
+        input_tokens: 10, output_tokens: 5, cache_read_tokens: 0, cache_creation_tokens: 0,
+        cost_usd: 0.001, duration_ms: 100,
+        "event.timestamp": `2026-04-15T12:00:0${i}.000Z`,
+      }));
+    }
+
+    const receiver = new OtelReceiver(500, resolver, projectsDir);
+    const batch = receiver.poll();
+
+    // All 5 events processed, all attributed to proj_platform
+    expect(batch.apiRequests).toHaveLength(5);
+    expect(batch.apiRequests.every(r => r.projId === "proj_platform")).toBe(true);
+    expect(lookupSession("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")).not.toBeNull();
+
+    rmSync(projectsDir, { recursive: true });
+  });
+
   test("skips non-LO session found on disk", () => {
     const projectsDir = createMockProjectsDir({
       "-Users-bigviking-Documents-github-projects-mhofwell-fpl-chat-app": [

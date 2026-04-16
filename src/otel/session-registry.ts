@@ -20,7 +20,7 @@ import { upsertSession, getSession, enqueueArchive, enqueue } from "../db/local"
 import type { SessionRow } from "../db/local";
 import type { ProjectResolver } from "../project/resolver";
 
-const PROJECTS_DIR = join(homedir(), ".claude", "projects");
+export const PROJECTS_DIR = join(homedir(), ".claude", "projects");
 
 // ─── UUID pattern ───────────────────────────────────────────────────────────
 
@@ -205,11 +205,12 @@ export function discoverAndRegisterSession(
   sessionId: string,
   resolver: ProjectResolver,
   projectsDir: string = PROJECTS_DIR,
+  knownLocation?: SessionLocation,
 ): SessionRow | null {
   const existing = getSession(sessionId);
   if (existing) return existing;
 
-  const location = findSessionLocation(sessionId, projectsDir);
+  const location = knownLocation ?? findSessionLocation(sessionId, projectsDir);
   if (!location) return null;
 
   const projId = resolveProjIdForDir(location.encodedDir, resolver);

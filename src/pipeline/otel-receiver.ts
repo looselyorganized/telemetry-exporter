@@ -8,64 +8,26 @@
  * discover their session on a future refresh).
  */
 
-import { readdirSync } from "fs";
-import { join } from "path";
-import { homedir } from "os";
-
 import {
   getUnprocessedOtelEvents,
   markOtelEventsProcessed,
   skipOtelEvents,
 } from "../db/local";
 import type { OtelEventRow } from "../db/local";
-import { lookupSession, findSessionLocation, discoverAndRegisterSession } from "../otel/session-registry";
+import {
+  lookupSession,
+  findSessionLocation,
+  discoverAndRegisterSession,
+  PROJECTS_DIR,
+} from "../otel/session-registry";
+import type { SessionLocation } from "../otel/session-registry";
 import { flattenAttributes } from "../otel/parser";
 import type { ProjectResolver } from "../project/resolver";
 
-const PROJECTS_DIR = join(homedir(), ".claude", "projects");
 const LO_PROJECT_DIR_RE = /^-users-bigviking-documents-github-projects-lo(?:-|$)/;
 
 export function isLOProjectDir(dir: string): boolean {
   return LO_PROJECT_DIR_RE.test(dir.toLowerCase());
-}
-
-const LO_SESSION_CACHE_MAX = 1000;
-const loSessionCache = new Map<string, boolean | null>();
-
-function isLOSession(sessionId: string): boolean | null {
-  if (loSessionCache.has(sessionId)) return loSessionCache.get(sessionId)!;
-  // Evict oldest entries if cache is full
-  if (loSessionCache.size >= LO_SESSION_CACHE_MAX) {
-    const firstKey = loSessionCache.keys().next().value;
-    if (firstKey) loSessionCache.delete(firstKey);
-  };
-  let result: boolean | null = null;
-  try {
-    for (const dir of readdirSync(PROJECTS_DIR)) {
-      const dirPath = join(PROJECTS_DIR, dir);
-      try {
-        const files = readdirSync(dirPath);
-        if (files.includes(`${sessionId}.jsonl`)) {
-          result = isLOProjectDir(dir);
-          break;
-        }
-        for (const entry of files) {
-          if (entry.endsWith(".jsonl")) continue;
-          try {
-            const subDir = join(dirPath, entry, "subagents");
-            const subFiles = readdirSync(subDir);
-            if (subFiles.includes(`${sessionId}.jsonl`)) {
-              result = isLOProjectDir(dir);
-              break;
-            }
-          } catch {}
-        }
-        if (result !== null) break;
-      } catch {}
-    }
-  } catch {}
-  loSessionCache.set(sessionId, result);
-  return result;
 }
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -159,6 +121,15 @@ export class OtelReceiver {
     const skippedIds: number[] = [];
     let unresolved = 0;
 
+    // Batch-scope memo: multiple events for the same unknown session share one FS walk
+    const locationMemo = new Map<string, SessionLocation | null>();
+    const findLocation = (sessionId: string): SessionLocation | null => {
+      if (locationMemo.has(sessionId)) return locationMemo.get(sessionId)!;
+      const loc = findSessionLocation(sessionId, this.projectsDir);
+      locationMemo.set(sessionId, loc);
+      return loc;
+    };
+
     for (const row of rows) {
       // Skip non-log event types (metrics/spans stored for future use)
       if (row.event_type === "metric" || row.event_type === "span") {
@@ -173,34 +144,28 @@ export class OtelReceiver {
       }
 
       let session = lookupSession(row.session_id);
-      if (!session) {
-        // Attempt filesystem discovery + registration
-        if (this.resolver) {
-          const location = findSessionLocation(row.session_id, this.projectsDir);
-          if (location) {
-            if (isLOProjectDir(location.encodedDir)) {
-              session = discoverAndRegisterSession(row.session_id, this.resolver, this.projectsDir);
-            } else {
-              skippedIds.push(row.id);
-              continue;
-            }
-          }
-        }
-        // Fallback: legacy isLOSession path (no resolver)
-        if (!session) {
-          const isLO = this.resolver ? null : isLOSession(row.session_id);
-          if (isLO === false) {
-            skippedIds.push(row.id);
-          } else {
-            const ageMs = Date.now() - new Date(row.received_at).getTime();
-            if (ageMs > 5 * 60 * 1000) {
-              skippedIds.push(row.id);
-            } else {
-              unresolved++;
-            }
-          }
+      if (!session && this.resolver) {
+        const location = findLocation(row.session_id);
+        if (location && isLOProjectDir(location.encodedDir)) {
+          session = discoverAndRegisterSession(
+            row.session_id,
+            this.resolver,
+            this.projectsDir,
+            location,
+          );
+        } else if (location) {
+          skippedIds.push(row.id);
           continue;
         }
+      }
+      if (!session) {
+        const ageMs = Date.now() - new Date(row.received_at).getTime();
+        if (ageMs > 5 * 60 * 1000) {
+          skippedIds.push(row.id);
+        } else {
+          unresolved++;
+        }
+        continue;
       }
 
       // Parse the stored logRecord payload
