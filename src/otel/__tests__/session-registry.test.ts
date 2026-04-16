@@ -8,6 +8,8 @@ import {
   lookupSession,
   registerSession,
   refreshRegistry,
+  findSessionLocation,
+  discoverAndRegisterSession,
 } from "../session-registry";
 import type { ProjectResolver } from "../../project/resolver";
 
@@ -253,6 +255,167 @@ describe("refreshRegistry", () => {
     // Original mapping should be preserved
     const session = lookupSession("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
     expect(session!.proj_id).toBe("proj_original");
+
+    rmSync(projectsDir, { recursive: true });
+  });
+});
+
+// ─── findSessionLocation ───────────────────────────────────────────────────
+
+describe("findSessionLocation", () => {
+  test("finds top-level session JSONL", () => {
+    const projectsDir = createMockProjectsDir({
+      "-Users-me-projects-lo-platform": [
+        "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.jsonl",
+      ],
+    });
+
+    const result = findSessionLocation("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", projectsDir);
+    expect(result).not.toBeNull();
+    expect(result!.encodedDir).toBe("-Users-me-projects-lo-platform");
+    expect(result!.parentSessionId).toBeNull();
+
+    rmSync(projectsDir, { recursive: true });
+  });
+
+  test("finds subagent session JSONL", () => {
+    const projectsDir = createMockProjectsDir({
+      "-Users-me-projects-lo-exporter": [
+        "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.jsonl",
+        "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee/subagents/11111111-2222-3333-4444-555555555555.jsonl",
+      ],
+    });
+
+    const result = findSessionLocation("11111111-2222-3333-4444-555555555555", projectsDir);
+    expect(result).not.toBeNull();
+    expect(result!.encodedDir).toBe("-Users-me-projects-lo-exporter");
+    expect(result!.parentSessionId).toBe("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
+
+    rmSync(projectsDir, { recursive: true });
+  });
+
+  test("returns null for unknown session", () => {
+    const projectsDir = createMockProjectsDir({
+      "-Users-me-projects-lo-platform": [
+        "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.jsonl",
+      ],
+    });
+
+    const result = findSessionLocation("99999999-0000-0000-0000-000000000000", projectsDir);
+    expect(result).toBeNull();
+
+    rmSync(projectsDir, { recursive: true });
+  });
+
+  test("returns null for nonexistent projects dir", () => {
+    const result = findSessionLocation("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", "/nonexistent");
+    expect(result).toBeNull();
+  });
+});
+
+// ─── discoverAndRegisterSession ────────────────────────────────────────────
+
+describe("discoverAndRegisterSession", () => {
+  test("discovers and registers a session found on disk", () => {
+    const projectsDir = createMockProjectsDir({
+      "-Users-me-projects-lo-platform": [
+        "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.jsonl",
+      ],
+    });
+
+    const resolver = mockResolver({ "-Users-me-projects-lo-platform": "proj_platform" });
+
+    expect(lookupSession("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")).toBeNull();
+
+    const result = discoverAndRegisterSession(
+      "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+      resolver,
+      projectsDir,
+    );
+    expect(result).not.toBeNull();
+    expect(result!.proj_id).toBe("proj_platform");
+
+    // Should now be in the registry
+    const session = lookupSession("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
+    expect(session).not.toBeNull();
+    expect(session!.proj_id).toBe("proj_platform");
+
+    rmSync(projectsDir, { recursive: true });
+  });
+
+  test("discovers and registers subagent with parent_session_id", () => {
+    const projectsDir = createMockProjectsDir({
+      "-Users-me-projects-lo-exporter": [
+        "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.jsonl",
+        "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee/subagents/11111111-2222-3333-4444-555555555555.jsonl",
+      ],
+    });
+
+    const resolver = mockResolver({ "-Users-me-projects-lo-exporter": "proj_exporter" });
+    const result = discoverAndRegisterSession(
+      "11111111-2222-3333-4444-555555555555",
+      resolver,
+      projectsDir,
+    );
+    expect(result).not.toBeNull();
+    expect(result!.proj_id).toBe("proj_exporter");
+    expect(result!.parent_session_id).toBe("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
+
+    rmSync(projectsDir, { recursive: true });
+  });
+
+  test("returns null when session not found on disk", () => {
+    const projectsDir = createMockProjectsDir({});
+    const resolver = mockResolver({});
+
+    const result = discoverAndRegisterSession(
+      "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+      resolver,
+      projectsDir,
+    );
+    expect(result).toBeNull();
+
+    rmSync(projectsDir, { recursive: true });
+  });
+
+  test("returns null when directory does not resolve to a project", () => {
+    const projectsDir = createMockProjectsDir({
+      "-Users-me-projects-unknown": [
+        "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.jsonl",
+      ],
+    });
+
+    const resolver = mockResolver({}); // nothing resolves
+
+    const result = discoverAndRegisterSession(
+      "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+      resolver,
+      projectsDir,
+    );
+    expect(result).toBeNull();
+
+    rmSync(projectsDir, { recursive: true });
+  });
+
+  test("does not overwrite existing session mapping", () => {
+    registerSession("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", "proj_original", "/original");
+
+    const projectsDir = createMockProjectsDir({
+      "-Users-me-projects-lo-platform": [
+        "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.jsonl",
+      ],
+    });
+
+    const resolver = mockResolver({ "-Users-me-projects-lo-platform": "proj_platform" });
+    const result = discoverAndRegisterSession(
+      "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+      resolver,
+      projectsDir,
+    );
+
+    // Returns the existing session (first-sighting wins)
+    expect(result).not.toBeNull();
+    expect(result!.proj_id).toBe("proj_original");
 
     rmSync(projectsDir, { recursive: true });
   });

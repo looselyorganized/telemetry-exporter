@@ -1,5 +1,7 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
-import { existsSync, unlinkSync } from "fs";
+import { existsSync, unlinkSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from "fs";
+import { tmpdir } from "os";
+import { join } from "path";
 import {
   initLocal,
   closeLocal,
@@ -7,7 +9,39 @@ import {
   upsertSession,
   getUnprocessedOtelEvents,
 } from "../../db/local";
+import { lookupSession } from "../../otel/session-registry";
 import { OtelReceiver, isLOProjectDir } from "../otel-receiver";
+import type { ProjectResolver } from "../../project/resolver";
+
+function mockResolver(mapping: Record<string, string>): ProjectResolver {
+  return {
+    resolve(name: string) {
+      const projId = mapping[name];
+      if (projId) return { projId, slug: name };
+      return null;
+    },
+    refresh: async () => {},
+    stats: () => ({ total: 0, fromLoYml: 0, fromNameCache: 0 }),
+  } as unknown as ProjectResolver;
+}
+
+function createMockProjectsDir(structure: Record<string, string[]>): string {
+  const tmpDir = mkdtempSync(join(tmpdir(), "lo-recv-"));
+  for (const [dirName, files] of Object.entries(structure)) {
+    const dirPath = join(tmpDir, dirName);
+    mkdirSync(dirPath, { recursive: true });
+    for (const file of files) {
+      if (file.includes("/")) {
+        const parts = file.split("/");
+        mkdirSync(join(dirPath, ...parts.slice(0, -1)), { recursive: true });
+        writeFileSync(join(dirPath, file), "");
+      } else {
+        writeFileSync(join(dirPath, file), "");
+      }
+    }
+  }
+  return tmpDir;
+}
 
 const TEST_DB_PATH = "/tmp/lo-test-otel-receiver.db";
 
@@ -265,5 +299,76 @@ describe("isLOProjectDir", () => {
     expect(
       isLOProjectDir("-Users-bigviking-Documents-github-projects-mhofwell-fpl-chat-app"),
     ).toBe(false);
+  });
+});
+
+describe("OtelReceiver with discovery", () => {
+  test("discovers and processes LO session found on disk but not in registry", () => {
+    const projectsDir = createMockProjectsDir({
+      "-Users-bigviking-Documents-github-projects-lo-platform": [
+        "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.jsonl",
+      ],
+    });
+
+    const resolver = mockResolver({
+      "-Users-bigviking-Documents-github-projects-lo-platform": "proj_platform",
+    });
+
+    // Event arrives for unknown session — no pre-registration
+    insertOtelEvent("api_request", "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", makeLogRecord({
+      "event.name": "api_request",
+      model: "claude-opus-4-6",
+      input_tokens: 100,
+      output_tokens: 50,
+      cache_read_tokens: 0,
+      cache_creation_tokens: 0,
+      cost_usd: 0.01,
+      duration_ms: 500,
+      "event.timestamp": "2026-04-15T12:00:00.000Z",
+    }));
+
+    const receiver = new OtelReceiver(500, resolver, projectsDir);
+    const batch = receiver.poll();
+
+    expect(batch.apiRequests).toHaveLength(1);
+    expect(batch.apiRequests[0].projId).toBe("proj_platform");
+    expect(batch.unresolved).toBe(0);
+    expect(batch.skipped).toBe(0);
+
+    // Session should now be registered
+    expect(lookupSession("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")).not.toBeNull();
+
+    rmSync(projectsDir, { recursive: true });
+  });
+
+  test("skips non-LO session found on disk", () => {
+    const projectsDir = createMockProjectsDir({
+      "-Users-bigviking-Documents-github-projects-mhofwell-fpl-chat-app": [
+        "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.jsonl",
+      ],
+    });
+
+    const resolver = mockResolver({});
+
+    insertOtelEvent("api_request", "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", makeLogRecord({
+      "event.name": "api_request",
+      model: "claude-opus-4-6",
+      input_tokens: 100,
+      output_tokens: 50,
+      cache_read_tokens: 0,
+      cache_creation_tokens: 0,
+      cost_usd: 0.01,
+      duration_ms: 500,
+      "event.timestamp": "2026-04-15T12:00:00.000Z",
+    }));
+
+    const receiver = new OtelReceiver(500, resolver, projectsDir);
+    const batch = receiver.poll();
+
+    expect(batch.apiRequests).toHaveLength(0);
+    expect(batch.skipped).toBe(1);
+    expect(lookupSession("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")).toBeNull();
+
+    rmSync(projectsDir, { recursive: true });
   });
 });

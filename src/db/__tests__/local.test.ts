@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { unlinkSync, existsSync } from "fs";
 import { Database } from "bun:sqlite";
-import { initLocal, getLocal, closeLocal, enqueue, purgeFailed } from "../local";
+import { initLocal, getLocal, closeLocal, enqueue, purgeFailed, insertOtelEvent, markOtelEventsProcessed, skipOtelEvents, otelIntegrityCheck } from "../local";
 
 const TEST_DB_PATH = "/tmp/lo-test-outbox.db";
 
@@ -754,5 +754,46 @@ describe("projects_blocked schema", () => {
       .all() as Array<{ name: string }>;
     const names = indexes.map((r) => r.name);
     expect(names).toContain("idx_projects_blocked_open");
+  });
+});
+
+// ─── otelIntegrityCheck ────────────────────────────────────────────────────
+
+describe("otelIntegrityCheck", () => {
+  it("reports correct counts for processed, skipped, and unresolved events", () => {
+    initLocal(TEST_DB_PATH);
+
+    // Insert events across two sessions
+    insertOtelEvent("api_request", "sess-a", "{}");
+    insertOtelEvent("api_request", "sess-a", "{}");
+    insertOtelEvent("api_request", "sess-b", "{}");
+    insertOtelEvent("api_request", "sess-b", "{}");
+    insertOtelEvent("api_request", "sess-b", "{}");
+
+    // Process sess-a events (ids 1,2)
+    markOtelEventsProcessed([1, 2]);
+    // Skip one sess-b event (id 3)
+    skipOtelEvents([3]);
+    // Leave ids 4,5 unprocessed
+
+    const gaps = otelIntegrityCheck(900);
+
+    const sessA = gaps.find(g => g.sessionId === "sess-a");
+    expect(sessA).not.toBeUndefined();
+    expect(sessA!.processed).toBe(2);
+    expect(sessA!.skipped).toBe(0);
+    expect(sessA!.unresolved).toBe(0);
+
+    const sessB = gaps.find(g => g.sessionId === "sess-b");
+    expect(sessB).not.toBeUndefined();
+    expect(sessB!.processed).toBe(0);
+    expect(sessB!.skipped).toBe(1);
+    expect(sessB!.unresolved).toBe(2);
+  });
+
+  it("returns empty array when no events exist", () => {
+    initLocal(TEST_DB_PATH);
+    const gaps = otelIntegrityCheck(900);
+    expect(gaps).toEqual([]);
   });
 });

@@ -18,8 +18,9 @@ import {
   skipOtelEvents,
 } from "../db/local";
 import type { OtelEventRow } from "../db/local";
-import { lookupSession } from "../otel/session-registry";
+import { lookupSession, findSessionLocation, discoverAndRegisterSession } from "../otel/session-registry";
 import { flattenAttributes } from "../otel/parser";
+import type { ProjectResolver } from "../project/resolver";
 
 const PROJECTS_DIR = join(homedir(), ".claude", "projects");
 const LO_PROJECT_DIR_RE = /^-users-bigviking-documents-github-projects-lo(?:-|$)/;
@@ -134,9 +135,13 @@ function getStr(attrs: Record<string, string | number | boolean>, key: string): 
 
 export class OtelReceiver {
   private batchSize: number;
+  private resolver: ProjectResolver | null;
+  private projectsDir: string;
 
-  constructor(batchSize = 500) {
+  constructor(batchSize = 500, resolver?: ProjectResolver, projectsDir?: string) {
     this.batchSize = batchSize;
+    this.resolver = resolver ?? null;
+    this.projectsDir = projectsDir ?? PROJECTS_DIR;
   }
 
   /**
@@ -167,20 +172,35 @@ export class OtelReceiver {
         continue;
       }
 
-      const session = lookupSession(row.session_id);
+      let session = lookupSession(row.session_id);
       if (!session) {
-        const isLO = isLOSession(row.session_id);
-        if (isLO === false) {
-          skippedIds.push(row.id);
-        } else {
-          const ageMs = Date.now() - new Date(row.received_at).getTime();
-          if (ageMs > 5 * 60 * 1000) {
-            skippedIds.push(row.id);
-          } else {
-            unresolved++;
+        // Attempt filesystem discovery + registration
+        if (this.resolver) {
+          const location = findSessionLocation(row.session_id, this.projectsDir);
+          if (location) {
+            if (isLOProjectDir(location.encodedDir)) {
+              session = discoverAndRegisterSession(row.session_id, this.resolver, this.projectsDir);
+            } else {
+              skippedIds.push(row.id);
+              continue;
+            }
           }
         }
-        continue;
+        // Fallback: legacy isLOSession path (no resolver)
+        if (!session) {
+          const isLO = this.resolver ? null : isLOSession(row.session_id);
+          if (isLO === false) {
+            skippedIds.push(row.id);
+          } else {
+            const ageMs = Date.now() - new Date(row.received_at).getTime();
+            if (ageMs > 5 * 60 * 1000) {
+              skippedIds.push(row.id);
+            } else {
+              unresolved++;
+            }
+          }
+          continue;
+        }
       }
 
       // Parse the stored logRecord payload

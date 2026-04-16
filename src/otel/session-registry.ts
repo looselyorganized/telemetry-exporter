@@ -44,6 +44,58 @@ function resolveEncodedDirToCwd(encodedName: string): string {
   return encodedName; // fallback: store encoded name as-is
 }
 
+// ─── Filesystem discovery ──────────────────────────────────────────────────
+
+export interface SessionLocation {
+  encodedDir: string;
+  parentSessionId: string | null;
+}
+
+/**
+ * Scan ~/.claude/projects/ for a session's JSONL file.
+ * Returns the encoded directory name and parent session ID (for subagents),
+ * or null if the session is not found on disk.
+ */
+export function findSessionLocation(
+  sessionId: string,
+  projectsDir: string = PROJECTS_DIR,
+): SessionLocation | null {
+  let dirs: string[];
+  try {
+    dirs = readdirSync(projectsDir);
+  } catch {
+    return null;
+  }
+
+  for (const encodedDir of dirs) {
+    const dirPath = join(projectsDir, encodedDir);
+    let entries: string[];
+    try {
+      entries = readdirSync(dirPath);
+    } catch {
+      continue;
+    }
+
+    if (entries.includes(`${sessionId}.jsonl`)) {
+      return { encodedDir, parentSessionId: null };
+    }
+
+    for (const entry of entries) {
+      if (entry.endsWith(".jsonl")) continue;
+      if (!isUuid(entry)) continue;
+      try {
+        const subDir = join(dirPath, entry, "subagents");
+        const subFiles = readdirSync(subDir);
+        if (subFiles.includes(`${sessionId}.jsonl`)) {
+          return { encodedDir, parentSessionId: entry };
+        }
+      } catch {}
+    }
+  }
+
+  return null;
+}
+
 // ─── Registry operations ────────────────────────────────────────────────────
 
 /**
@@ -136,6 +188,43 @@ export function buildSessionRegistry(
  * Look up a session by ID. Returns {proj_id, cwd} or null.
  */
 export function lookupSession(sessionId: string): SessionRow | null {
+  return getSession(sessionId);
+}
+
+/**
+ * Discover a session's project from the filesystem and register it.
+ *
+ * Scans ~/.claude/projects/ for the session's JSONL file, resolves
+ * the containing directory to a proj_id via the ProjectResolver,
+ * and registers the mapping. Returns the session row or null if the
+ * session cannot be found or resolved.
+ *
+ * Immutable: if the session is already registered, returns the existing row.
+ */
+export function discoverAndRegisterSession(
+  sessionId: string,
+  resolver: ProjectResolver,
+  projectsDir: string = PROJECTS_DIR,
+): SessionRow | null {
+  const existing = getSession(sessionId);
+  if (existing) return existing;
+
+  const location = findSessionLocation(sessionId, projectsDir);
+  if (!location) return null;
+
+  const projId = resolveProjIdForDir(location.encodedDir, resolver);
+  if (!projId) return null;
+
+  const cwd = resolveEncodedDirToCwd(location.encodedDir);
+  upsertSession(sessionId, projId, cwd, location.parentSessionId ?? undefined);
+  archiveSessionMapping(sessionId, projId, cwd);
+  enqueue("sessions", {
+    id: sessionId,
+    project_id: projId,
+    parent_session_id: location.parentSessionId,
+    started_at: new Date().toISOString(),
+  });
+
   return getSession(sessionId);
 }
 

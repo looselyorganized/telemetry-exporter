@@ -26,7 +26,7 @@ import { ProjectBlocker } from "../src/pipeline/project-blocker";
 import { reportError, clearErrors } from "../src/errors";
 import { flushErrors, pruneResolved, clearErrorsTable } from "../src/db/errors";
 import { PID_FILE, isExporterProcess, parsePidFile } from "../src/cli-output";
-import { initLocal, getLocal, closeLocal, purgeFailed, pruneProcessedOtelEvents, expireStaleOtelEvents, otelEventsReceivedSince, otelActiveSessionCount, otelQueueDepth } from "../src/db/local";
+import { initLocal, getLocal, closeLocal, purgeFailed, pruneProcessedOtelEvents, expireStaleOtelEvents, otelEventsReceivedSince, otelActiveSessionCount, otelQueueDepth, otelIntegrityCheck } from "../src/db/local";
 import { startOtlpServer, stopOtlpServer, pruneRateLimits } from "../src/otel/server";
 import { buildSessionRegistry, refreshRegistry } from "../src/otel/session-registry";
 import { OtelReceiver } from "../src/pipeline/otel-receiver";
@@ -146,7 +146,7 @@ const sessionCount = buildSessionRegistry(resolver);
 console.log(`  Session registry: ${sessionCount} sessions mapped from ~/.claude/projects/`);
 
 const logReceiver = new LogReceiver(LOG_FILE, DB_PATH);
-const otelReceiver = new OtelReceiver();
+const otelReceiver = new OtelReceiver(500, resolver);
 const projectBlocker = new ProjectBlocker(getLocal());
 projectBlocker.loadBlocked();
 const blockedAtStartup = projectBlocker.getBlocked().size;
@@ -334,6 +334,22 @@ async function pipelineLoop(): Promise<never> {
         console.log(`  ${time()} — OTel: ${otelRate} events/min, ${otelSessions} sessions, ${otelDepth} queued`);
         if (watcher.activeAgents > 0 && otelRate === 0) {
           console.warn(`  ${time()} — Active agents detected but no OTel events — check CLAUDE_CODE_ENABLE_TELEMETRY`);
+        }
+
+        // OTel integrity check: report sessions with skipped or unresolved events
+        for (const row of otelIntegrityCheck(900)) {
+          if (row.skipped > 0 || row.unresolved > 0) {
+            console.warn(JSON.stringify({
+              evt: "otel_integrity_gap",
+              ts: new Date().toISOString(),
+              session_id: row.sessionId,
+              received: row.received,
+              processed: row.processed,
+              skipped: row.skipped,
+              unresolved: row.unresolved,
+              window_seconds: 900,
+            }));
+          }
         }
 
         // Emit periodic drop-count summary for blocked projects, then reset.

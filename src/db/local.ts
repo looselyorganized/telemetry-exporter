@@ -536,6 +536,39 @@ export function skipOtelEvents(ids: number[]): void {
   db.query(`UPDATE otel_events SET processed = 2 WHERE id IN (${placeholders})`).run(...ids);
 }
 
+export interface OtelIntegrityRow {
+  sessionId: string;
+  received: number;
+  processed: number;
+  skipped: number;
+  unresolved: number;
+}
+
+export function otelIntegrityCheck(windowSeconds: number): OtelIntegrityRow[] {
+  const db = getLocal();
+  const rows = db
+    .query<{ session_id: string; received: number; processed: number; skipped: number; unresolved: number }, [number]>(
+      `SELECT session_id,
+              COUNT(*) AS received,
+              SUM(CASE WHEN processed = 1 THEN 1 ELSE 0 END) AS processed,
+              SUM(CASE WHEN processed = 2 THEN 1 ELSE 0 END) AS skipped,
+              SUM(CASE WHEN processed = 0 THEN 1 ELSE 0 END) AS unresolved
+       FROM otel_events
+       WHERE received_at > datetime('now', ? || ' seconds')
+         AND session_id IS NOT NULL
+       GROUP BY session_id`
+    )
+    .all(-windowSeconds);
+
+  return rows.map(r => ({
+    sessionId: r.session_id,
+    received: r.received,
+    processed: r.processed,
+    skipped: r.skipped,
+    unresolved: r.unresolved,
+  }));
+}
+
 export function pruneProcessedOtelEvents(olderThanDays: number): number {
   const db = getLocal();
   const result = db
