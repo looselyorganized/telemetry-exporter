@@ -493,7 +493,7 @@ export function otelEventsReceivedSince(seconds: number): number {
   const db = getLocal();
   const row = db
     .query<{ count: number }, [number]>(
-      "SELECT COUNT(*) AS count FROM otel_events WHERE received_at > datetime('now', ? || ' seconds')"
+      "SELECT COUNT(*) AS count FROM otel_events WHERE received_at > strftime('%Y-%m-%dT%H:%M:%fZ', 'now', ? || ' seconds')"
     )
     .get(-seconds)!;
   return row.count;
@@ -504,7 +504,7 @@ export function otelActiveSessionCount(seconds: number): number {
   const db = getLocal();
   const row = db
     .query<{ count: number }, [number]>(
-      "SELECT COUNT(DISTINCT session_id) AS count FROM otel_events WHERE session_id IS NOT NULL AND received_at > datetime('now', ? || ' seconds')"
+      "SELECT COUNT(DISTINCT session_id) AS count FROM otel_events WHERE session_id IS NOT NULL AND received_at > strftime('%Y-%m-%dT%H:%M:%fZ', 'now', ? || ' seconds')"
     )
     .get(-seconds)!;
   return row.count;
@@ -554,7 +554,7 @@ export function otelIntegrityCheck(windowSeconds: number): OtelIntegrityRow[] {
               SUM(CASE WHEN processed = 2 THEN 1 ELSE 0 END) AS skipped,
               SUM(CASE WHEN processed = 0 THEN 1 ELSE 0 END) AS unresolved
        FROM otel_events
-       WHERE received_at > datetime('now', ? || ' seconds')
+       WHERE received_at > strftime('%Y-%m-%dT%H:%M:%fZ', 'now', ? || ' seconds')
          AND session_id IS NOT NULL
        GROUP BY session_id`
     )
@@ -575,7 +575,7 @@ export function pruneProcessedOtelEvents(olderThanDays: number): number {
     .query<never, [number]>(
       `DELETE FROM otel_events
        WHERE processed = 1
-         AND received_at < datetime('now', ? || ' days')`
+         AND received_at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now', ? || ' days')`
     )
     .run(-olderThanDays);
   return result.changes;
@@ -592,7 +592,7 @@ export function expireStaleOtelEvents(olderThanHours: number): number {
     .query<never, [number]>(
       `UPDATE otel_events SET processed = 1
        WHERE processed = 0
-         AND received_at < datetime('now', ? || ' hours')`
+         AND received_at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now', ? || ' hours')`
     )
     .run(-olderThanHours);
   return result.changes;
